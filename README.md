@@ -7,3 +7,15 @@ npm run manage # admin management cli
 npm run serve # run a local tunnel to test API
 npm run publish # deploy
 ```
+
+
+# TODO
+
+- sites
+- deployments
+- infrastructure
+- custom domains
+- deploy keys
+- production deploy
+- Github authentication
+- deploy CLI

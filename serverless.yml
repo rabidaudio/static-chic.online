@@ -31,7 +31,6 @@ provider:
             - Fn::GetAtt: [UsersTable, Arn]
   # environment:
 
-
 functions:
   api:
     handler: handler.handler

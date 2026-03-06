@@ -10,17 +10,35 @@
   "dependencies": {
     "@aws-sdk/client-dynamodb": "^3.585.0",
     "@aws-sdk/lib-dynamodb": "^3.585.0",
+    "dotenv": "^17.3.1",
     "express": "^4.19.2",
     "serverless-http": "^3.2.0",
     "yargs": "^18.0.0"
   },
   "devDependencies": {
+    "axios": "^1.13.6",
+    "chai": "^6.2.2",
+    "mocha": "^11.7.5",
     "standard": "^17.1.2"
   },
   "scripts": {
     "serve": "serverless dev",
     "lint": "standard --fix",
     "publish": "serverless deploy",
-    "manage": "node admin_cli.js"
-  }
+    "manage": "node admin_cli.js",
+    "test": "mocha"
+  },
+  "mocha": {
+    "timeout": 15000,
+    "slow": 3000,
+    "spec": [
+      "tests/**/*.test.js"
+    ]
+  },
+  "main": "handler.js",
+  "directories": {
+    "test": "tests"
+  },
+  "author": "Julien Dorothy, julien@rabidaudio.com",
+  "license": "MIT"
 }
