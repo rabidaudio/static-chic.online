@@ -1,7 +1,7 @@
 const express = require('express')
 const serverless = require('serverless-http')
 
-const db = require('./db')
+const app = require('./app')
 
 const app = express()
 
@@ -9,7 +9,7 @@ app.use(express.json())
 
 app.get('/users/:userId', async (req, res) => {
   try {
-    const user = await db.getUser(req.params.userId)
+    const user = await app.getUser(req.params.userId)
     if (user) {
       const { userId, name } = user
       res.json({ userId, name })
@@ -33,7 +33,7 @@ app.post('/users', async (req, res) => {
   }
 
   try {
-    const user = await db.createUser({ userId, name })
+    const user = await app.createUser({ userId, name })
     res.json(user)
   } catch (error) {
     console.error(error)

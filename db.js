@@ -12,19 +12,19 @@ const docClient = DynamoDBDocumentClient.from(client)
 const NODE_ENV = process.env.NODE_ENV || 'dev'
 const tablePrefix = `rabidaudio-cheap-static-sites-${NODE_ENV}`
 
-exports.createUser = async (user) => {
+exports.create = async (table, data) => {
   const command = new PutCommand({
-    TableName: `${tablePrefix}-users`,
-    Item: user
+    TableName: `${tablePrefix}-${table}`,
+    Item: data
   })
   await docClient.send(command)
-  return user
+  return data
 }
 
-exports.getUser = async (userId) => {
+exports.show = async (table, key) => {
   const command = new GetCommand({
-    TableName: `${tablePrefix}-users`,
-    Key: { userId }
+    TableName: `${tablePrefix}-${table}`,
+    Key: key // e.g. { userId }
   })
   const { Item } = await docClient.send(command)
   return Item
