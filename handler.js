@@ -5,7 +5,6 @@ const db = require('./db')
 
 const app = express()
 
-
 app.use(express.json())
 
 app.get('/users/:userId', async (req, res) => {

@@ -29,8 +29,8 @@ provider:
             - dynamodb:DeleteItem
           Resource:
             - Fn::GetAtt: [UsersTable, Arn]
-  environment:
-    USERS_TABLE: ${param:tablePrefix}-users
+  # environment:
+
 
 functions:
   api:
