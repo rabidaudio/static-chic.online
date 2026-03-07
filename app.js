@@ -1,7 +1,8 @@
 const path = require('node:path')
 const { randomBytes } = require('node:crypto')
-const { createReadStream, existsSync } = require('node:fs')
-const { glob, mkdir, rm } = require('node:fs/promises')
+const { createReadStream } = require('node:fs')
+const { glob, mkdtemp, stat } = require('node:fs/promises')
+const { tmpdir } = require('node:os')
 const { pipeline } = require('node:stream/promises')
 
 const namor = require('namor')
@@ -39,6 +40,7 @@ const generateDeployId = () => {
   const rand = randomBytes(4)
   return Buffer.concat([timestamp, rand]).toString('hex')
 }
+
 
 exports.createUser = async ({ userId, name }) => {
   return await db.create('users', {
@@ -101,17 +103,13 @@ exports.promoteDeployment = async ({ siteId, deploymentId }) => {
 
   // in order to unzip the tarball in place, we need to download it, extract it
   // locally, and upload each file one at a time.
-  const tmpDir = path.join('/tmp', deploymentId)
-  console.log("creating tmpdir", tmpDir)
-  await prepareTempDirectory(deploymentId)
+  const tmpDir = await mkdtemp(path.join(tmpdir(), `${process.env.TABLE_PREFIX}-`))
   const tarballPath = deploymentTarballKey(siteId, deploymentId)
   console.log('downloading', tarballPath, 'to', tmpDir)
   const tarball = await s3.download(tarballPath)
-  console.log('cwd', process.cwd())
   const extract = tar.extract({ cwd: tmpDir, strict: true, onReadEntry: console.log.bind(console) })
-  console.log('extracting tarball')
+  console.log('extracting tarball', extract)
   await pipeline(tarball, extract) // wait for extraction to complete
-  console.log('cwd', process.cwd())
 
   console.log('deleting live site', siteContentPath)
   await s3.deleteRecursive(siteContentPath)
@@ -119,11 +117,13 @@ exports.promoteDeployment = async ({ siteId, deploymentId }) => {
   // upload the tarball
   console.log('uploading files')
   for await (const entry of glob(path.join(tmpDir, '**', '*'))) {
-    const key = path.join(siteContentPath, path.relative(tmpDir, entry))
-    console.log('upload', entry, key)
-    await s3.upload(key, createReadStream(entry))
+    const s = await stat(entry)
+    if (!s.isDirectory()) {
+      const key = path.join(siteContentPath, path.relative(tmpDir, entry))
+      console.log('upload', entry, key)
+      await s3.upload(key, createReadStream(entry))
+    }
   }
-  // await cleanTempDirectory(tmpDir)
 
   // TODO: invalidate CloudFront
 
@@ -134,18 +134,6 @@ exports.promoteDeployment = async ({ siteId, deploymentId }) => {
     deployedAt: new Date().toISOString()
   })
 }
-
-const prepareTempDirectory = async (tmpDir) => {
-  if (existsSync(tmpDir)) {
-    await cleanTempDirectory(tmpDir)
-  }
-  await mkdir(tmpDir)
-}
-
-const cleanTempDirectory = async (tmpDir) => {
-  await rm(tmpDir, { recursive: true })
-}
-
 
 // create a stream of a .tar.gz of the directory at the provided path.
 // returns a node stream that can be piped to a file or request.
