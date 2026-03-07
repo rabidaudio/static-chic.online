@@ -41,13 +41,14 @@ curl -X POST \
 
 # TODO
 
-- deployments
-- infrastructure
+- bug in untar, inconsistent repro
+- switch to koa
+- domain and app name
+- vcr tests
+- cloudfront
 - custom domains
 - deploy keys
 - production deploy
 - Github authentication
 - deploy CLI
-- switch to koa
-- vcr tests
-- configure EphemeralStorage
+- frontend

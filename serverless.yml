@@ -9,13 +9,17 @@ stages:
   default:
     params:
       tablePrefix: "${self:org}-${self:app}-${sls:stage}"
+      domain: ${sls:stage}.static-chic.online
+  prod:
+    params:
+      domain: static-chic.online
 
 provider:
   name: aws
   runtime: nodejs22.x
-  # Uncomment to easily set up a custom domain. Read the docs for more details:
-  # https://www.serverless.com/framework/docs/providers/aws/guide/domains
-  # domain: api.example.com
+  # domains:
+  #   - ${param:domain}
+  #   - "*.${param:domain}"
   iam:
     role:
       statements:
@@ -51,6 +55,7 @@ provider:
                 - '/*'
   environment:
     TABLE_PREFIX: ${param:tablePrefix}
+    NODE_ENV: ${sls:stage}
 
 functions:
   api:
