@@ -50,3 +50,4 @@ curl -X POST \
 - deploy CLI
 - switch to koa
 - vcr tests
+- configure EphemeralStorage

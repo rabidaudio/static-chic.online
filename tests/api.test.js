@@ -1,5 +1,4 @@
 /* global describe, it */
-require('dotenv').config()
 
 const path = require('node:path')
 const { buffer } = require('node:stream/consumers')
@@ -38,9 +37,7 @@ describe('API', () => {
       it('should create a new deployment', async () => {
         const testTarball = await createTarball(path.join(__dirname, '..', 'example-dist'))
         const data = await buffer(testTarball)
-        console.log('data', data)
-        const res = await api.post('/sites/prison-mentor-ydd8c/deployments', {
-          data,
+        const res = await api.post('/sites/prison-mentor-ydd8c/deployments', data, {
           headers: {
             'Content-Type': 'application/gzip'
           }
@@ -59,10 +56,19 @@ describe('API', () => {
         expect(res.status).to.equal(200)
         expect(res.data.status).to.equal('OK')
         const deployments = res.data.data
-        console.log(deployments)
         expect(deployments.length).to.equal(res.data.pagination.count)
         expect(deployments[0].deploymentId).to.match(/^[0-9a-f]{24}$/)
         expect(deployments[0].siteId).to.equal('prison-mentor-ydd8c')
+      })
+    })
+
+    describe('promote', () => {
+      it('should make the deployment live for the site', async () => {
+        const res = await api.post('/sites/prison-mentor-ydd8c/deployments/0000019cc63c89f5001bda59/promote')
+        expect(res.status).to.equal(200)
+        expect(res.data.status).to.equal('OK')
+        expect(res.data.data.siteId).to.equal('prison-mentor-ydd8c')
+        expect(res.data.data.currentDeployment).to.equal('0000019cc63c89f5001bda59')
       })
     })
   })

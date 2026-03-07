@@ -20,6 +20,7 @@
     "yargs": "^18.0.0"
   },
   "devDependencies": {
+    "@dotenvx/dotenvx": "^1.54.1",
     "axios": "^1.13.6",
     "chai": "^6.2.2",
     "mocha": "^11.7.5",
@@ -27,10 +28,11 @@
   },
   "scripts": {
     "serve": "serverless dev",
+    "serve:local": "dotenvx run -- node local_server",
     "lint": "standard --fix",
     "publish": "serverless deploy",
-    "manage": "node admin_cli.js",
-    "test": "mocha"
+    "manage": "dotenvx run -- node admin_cli.js",
+    "test": "dotenvx run -- mocha"
   },
   "mocha": {
     "timeout": 15000,

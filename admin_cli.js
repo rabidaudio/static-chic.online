@@ -1,5 +1,3 @@
-require('dotenv').config()
-
 const yargs = require('yargs')
 const { hideBin } = require('yargs/helpers')
 

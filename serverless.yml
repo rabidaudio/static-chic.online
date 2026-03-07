@@ -42,6 +42,7 @@ provider:
             - s3:DeleteObject
             - s3:GetBucketAcl
             - s3:AbortMultipartUpload
+            - s3:ListBucket
           Resource:
             - Fn::GetAtt: [DeploymentBucket, Arn]
             - Fn::Join:
