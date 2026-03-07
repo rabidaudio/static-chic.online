@@ -1,53 +1,76 @@
-const express = require('express')
+const Koa = require('koa')
+const Router = require('@koa/router')
 
 const app = require('./app')
 
-const server = express()
+const server = new Koa()
+const router = new Router()
 
-server.use(express.json())
-
-server.get('/sites/:siteId/deployments', async (req, res) => {
-  const deployments = await app.listDeployments(req.params.siteId)
-  res.json({ status: 'OK', data: deployments, pagination: { count: deployments.length } })
+// log
+server.use(async (ctx, next) => {
+  console.log(`${ctx.method} ${ctx.url}`)
+  const start = Date.now()
+  await next()
+  const ms = Date.now() - start
+  console.log(`[${ctx.status}] ${ctx.method} ${ctx.url} - ${ms}ms\n`)
 })
 
-server.post('/sites/:siteId/deployments', async (req, res) => {
+// server errors
+server.use(async (ctx, next) => {
+  try {
+    return await next()
+  } catch (err) {
+    console.error(err.stack)
+    const errorData = {
+      message: 'Server Error'
+    }
+    if (process.env.NODE_ENV === 'dev') {
+      errorData.message = err.message
+    }
+    ctx.status = 500
+    ctx.body = {
+      status: 'ERROR',
+      error: errorData
+    }
+  }
+})
+
+router.get('/sites/:siteId/deployments', async (ctx) => {
+  const deployments = await app.listDeployments(ctx.params.siteId)
+  ctx.body = {
+    status: 'OK',
+    data: deployments,
+    pagination: { count: deployments.length }
+  }
+})
+
+router.post('/sites/:siteId/deployments', async (ctx) => {
   // TODO: authentication
-  const siteId = req.params.siteId
-  const contentTarball = ReadableStream.from(req)
+  const siteId = ctx.params.siteId
+  const contentTarball = ReadableStream.from(ctx.req)
   const deployment = await app.createDeployment({ siteId, contentTarball })
-  res.json({ status: 'OK', data: deployment })
+  ctx.body = { status: 'OK', data: deployment }
 })
 
-// server.get('/sites/:siteId/deployments/:deploymentId', async (req, res) => {})
+// router.get('/sites/:siteId/deployments/:deploymentId', async (ctx) => {})
 
-server.post('/sites/:siteId/deployments/:deploymentId/promote', async (req, res) => {
-  const siteId = req.params.siteId
-  const deploymentId = req.params.deploymentId
+router.post('/sites/:siteId/deployments/:deploymentId/promote', async (ctx) => {
+  const siteId = ctx.params.siteId
+  const deploymentId = ctx.params.deploymentId
   const site = await app.promoteDeployment({ siteId, deploymentId })
   const { currentDeployment, deployedAt } = site
-  res.json({ status: 'OK', data: { siteId, currentDeployment, deployedAt } })
+  ctx.body = { status: 'OK', data: { siteId, currentDeployment, deployedAt } }
 })
 
-server.use((req, res, next) => {
-  return res.status(404).json({
+server.use(router.routes()).use(router.allowedMethods())
+
+// fallthrough
+server.use((ctx) => {
+  ctx.status = 404
+  ctx.body = {
     status: 'ERROR',
     error: { message: 'Not Found' }
-  })
-})
-
-server.use((err, req, res, next) => {
-  console.error(err.stack)
-  const errorData = {
-    message: 'Server Error'
   }
-  if (process.env.NODE_ENV === 'dev') {
-    errorData.message = err.message
-  }
-  res.status(500).json({
-    status: 'ERROR',
-    error: errorData
-  })
 })
 
 exports.server = server

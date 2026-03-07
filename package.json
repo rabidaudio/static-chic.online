@@ -12,8 +12,8 @@
     "@aws-sdk/client-s3": "^3.1004.0",
     "@aws-sdk/lib-dynamodb": "^3.585.0",
     "@aws-sdk/lib-storage": "^3.1004.0",
-    "dotenv": "^17.3.1",
-    "express": "^4.19.2",
+    "@koa/router": "^15.3.1",
+    "koa": "^3.1.2",
     "namor": "^3.0.3",
     "serverless-http": "^3.2.0",
     "tar": "^7.5.10",
@@ -23,7 +23,7 @@
     "@dotenvx/dotenvx": "^1.54.1",
     "axios": "^1.13.6",
     "chai": "^6.2.2",
-    "mocha": "^11.7.5",
+    "mocha": "^11.3.0",
     "standard": "^17.1.2"
   },
   "scripts": {
