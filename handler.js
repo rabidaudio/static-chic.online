@@ -1,50 +1,47 @@
+require('dotenv').config()
+
 const express = require('express')
 const serverless = require('serverless-http')
 
 const app = require('./app')
 
-const app = express()
+const server = express()
 
-app.use(express.json())
+server.use(express.json())
 
-app.get('/users/:userId', async (req, res) => {
-  try {
-    const user = await app.getUser(req.params.userId)
-    if (user) {
-      const { userId, name } = user
-      res.json({ userId, name })
-    } else {
-      res
-        .status(404)
-        .json({ error: 'Could not find user with provided "userId"' })
-    }
-  } catch (error) {
-    console.log(error)
-    res.status(500).json({ error: 'Could not retrieve user' })
-  }
+server.get('/sites/:siteId/deployments', async (req, res) => {
+  const deployments = await app.listDeployments(req.params.siteId)
+  res.json({ status: 'OK', data: deployments, pagination: { count: deployments.length } })
 })
 
-app.post('/users', async (req, res) => {
-  const { userId, name } = req.body
-  if (typeof userId !== 'string') {
-    res.status(400).json({ error: '"userId" must be a string' })
-  } else if (typeof name !== 'string') {
-    res.status(400).json({ error: '"name" must be a string' })
-  }
+// server.get('/sites/:siteId/deployments/:deploymentId', async (req, res) => {})
 
-  try {
-    const user = await app.createUser({ userId, name })
-    res.json(user)
-  } catch (error) {
-    console.error(error)
-    res.status(500).json({ error: 'Could not create user' })
-  }
+server.post('/sites/:siteId/deployments', async (req, res) => {
+  // TODO: authentication
+  const siteId = req.params.siteId
+  const deployment = await app.createDeployment({ siteId, contentTarball: ReadableStream.from(req) })
+  res.json({ status: 'OK', data: deployment })
 })
 
-app.use((req, res, next) => {
+server.use((req, res, next) => {
   return res.status(404).json({
-    error: 'Not Found'
+    status: 'ERROR',
+    error: { message: 'Not Found' }
   })
 })
 
-exports.handler = serverless(app)
+server.use((err, req, res, next) => {
+  console.error(err.stack)
+  const errorData = {
+    message: 'Server Error'
+  }
+  if (process.env.NODE_ENV === 'dev') {
+    errorData.message = err.message
+  }
+  res.status(500).json({
+    status: 'ERROR',
+    error: errorData
+  })
+})
+
+exports.handler = serverless(server)

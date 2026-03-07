@@ -29,7 +29,27 @@ provider:
             - dynamodb:DeleteItem
           Resource:
             - Fn::GetAtt: [UsersTable, Arn]
-  # environment:
+            - Fn::GetAtt: [SitesTable, Arn]
+            - Fn::GetAtt: [DeploymentsTable, Arn]
+        - Effect: Allow
+          Action:
+            - s3:GetObjectAcl
+            - s3:GetObject
+            - s3:GetObjectAttributes
+            - s3:GetObjectVersionAcl
+            - s3:GetObjectTagging
+            - s3:PutObject
+            - s3:DeleteObject
+            - s3:GetBucketAcl
+            - s3:AbortMultipartUpload
+          Resource:
+            - Fn::GetAtt: [DeploymentBucket, Arn]
+            - Fn::Join:
+              - ''
+              - - Fn::GetAtt: [DeploymentBucket, Arn]
+                - '/*'
+  environment:
+    TABLE_PREFIX: ${param:tablePrefix}
 
 functions:
   api:
@@ -39,6 +59,11 @@ functions:
 
 resources:
   Resources:
+    DeploymentBucket:
+      Type: AWS::S3::Bucket
+      DeletionPolicy: Retain
+      Properties:
+        BucketName: ${param:tablePrefix}
     UsersTable:
       Type: AWS::DynamoDB::Table
       Properties:
@@ -61,3 +86,18 @@ resources:
             KeyType: HASH
         BillingMode: PAY_PER_REQUEST
         TableName: ${param:tablePrefix}-sites
+    DeploymentsTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        AttributeDefinitions:
+          - AttributeName: siteId
+            AttributeType: S
+          - AttributeName: deploymentId
+            AttributeType: S
+        KeySchema:
+          - AttributeName: siteId
+            KeyType: HASH
+          - AttributeName: deploymentId
+            KeyType: RANGE
+        BillingMode: PAY_PER_REQUEST
+        TableName: ${param:tablePrefix}-deployments
