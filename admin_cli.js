@@ -27,6 +27,18 @@ function main () {
       const user = await app.createUser({ userId: argv.username, name: argv.name })
       console.log(user)
     })
+    .command('list_sites <username>', 'show all the sites managed by the user', (yargs) => {
+      return yargs
+        .positional('username', { describe: 'the username of the user' })
+    }, async (argv) => {
+      // TODO: auth tokens?
+
+      const sites = await app.listSitesForUser(argv.username)
+      console.log(sites)
+    })
+
+  // exports. = async (userId) => {
+
     .command('add_site', 'create a new site', (yargs) => {
       return yargs
         .example('add_site -o [username] -n [name]')

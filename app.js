@@ -69,11 +69,17 @@ exports.createSite = async ({ name, userId }) => {
 }
 
 exports.getSite = async (siteId) => {
-  return await db.show('sites', { siteId })
+  const site = await db.show('sites', { siteId })
+  return { ...site, deployKey: '<obfuscated>' }
+}
+
+exports.listSitesForUser = async (userId) => {
+  const sites = await db.query('sites', { userId }, { idx: 'idxUserId', asc: false })
+  return sites.map(site => ({ ...site, deployKey: '<obfuscated>' }))
 }
 
 exports.listDeployments = async (siteId) => {
-  return await db.query('deployments', { siteId })
+  return await db.query('deployments', { siteId }, { asc: false })
 }
 
 // create a new deployment for a site.

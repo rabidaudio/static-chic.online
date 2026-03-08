@@ -91,11 +91,24 @@ resources:
         AttributeDefinitions:
           - AttributeName: siteId
             AttributeType: S
+          - AttributeName: userId
+            AttributeType: S
+          - AttributeName: createdAt
+            AttributeType: S
         KeySchema:
           - AttributeName: siteId
             KeyType: HASH
         BillingMode: PAY_PER_REQUEST
         TableName: ${param:tablePrefix}-sites
+        GlobalSecondaryIndexes:
+          - IndexName: idxUserId
+            KeySchema:
+              - AttributeName: userId
+                KeyType: HASH
+              - AttributeName: createdAt
+                KeyType: RANGE
+            Projection:
+              ProjectionType: ALL
     DeploymentsTable:
       Type: AWS::DynamoDB::Table
       Properties:
@@ -201,22 +214,20 @@ resources:
               Ref: SiteCertificate
             MinimumProtocolVersion: TLSv1.2_2021
             SslSupportMethod: sni-only
-
-
-
-# "MyDistributionTenant": {
-#       "Type": "AWS::CloudFront::DistributionTenant",
-#       "Properties": {
-#         "Domains": [
-#           "my-distribution-tenant.example.com"
-#         ],
-#         "DistributionId": "MyMultiTenantDistribution.Id",
-#         "Name": "MyDistributionTenant",
-#         "Enabled": true,
-#         "Parameters": [
-#           {
-#             "Name": "tenantName",
-#             "Value": "first-user"
-#           }
-#         ]
-#       }
+    # TEST
+    # MyDistributionTenant:
+    #   Type: AWS::CloudFront::DistributionTenant
+    #   Properties:
+    #     Domains:
+    #       - "#{}"
+    #       # - # <customDomain>
+    #     DistributionId: <distroID>
+    #     Name: <siteName>
+    #     Enabled: true
+    #     Parameters:
+    #       Name: siteId
+    #       Value: <siteId>
+    #     # if custom domain
+    #     ManagedCertificateRequest:
+    #       PrimaryDomainName: # <customDomain>
+    #       ValidationTokenHost: cloudfront

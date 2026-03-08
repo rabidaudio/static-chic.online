@@ -40,17 +40,19 @@ exports.show = async (table, key) => {
 // Return an efficient page of results by filtering to partitionKey and ordering
 // by sortKey descending.
 // TODO: support pagination
-exports.query = async (table, partition) => {
+exports.query = async (table, partition, { asc, idx }) => {
   const [partitionKey, partitionValue] = Object.entries(partition)[0]
-  const command = new QueryCommand({
+  const params = {
     TableName: `${tablePrefix}-${table}`,
     Limit: 100,
-    ScanIndexForward: false,
+    ScanIndexForward: asc,
     ExpressionAttributeValues: {
       ':v1': partitionValue
     },
     KeyConditionExpression: `${partitionKey} = :v1`
-  })
+  }
+  if (idx) params.IndexName = idx
+  const command = new QueryCommand(params)
   const { Items } = await docClient.send(command)
   return Items || []
 }
