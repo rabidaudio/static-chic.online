@@ -9,6 +9,8 @@ const {
   StackNotFoundException
 } = require('@aws-sdk/client-cloudformation')
 
+const logger = require('./logger').getLogger()
+
 const client = new CloudFormationClient()
 
 const template = fs.readFileSync(path.resolve(__dirname, 'tenant.template.yaml')).toString('utf8')
@@ -48,8 +50,9 @@ const generateSiteParameters = ({ siteId, customDomain }) => ([
 const generateStackName = (siteId) => `${process.env.APP_ID}-${siteId}`
 
 exports.createSite = async ({ siteId, customDomain }) => {
+  const stackName = generateStackName(siteId)
   const params = {
-    StackName: generateStackName(siteId),
+    StackName: stackName,
     TemplateBody: template,
     Parameters: generateSiteParameters({ siteId, customDomain }),
     Tags: [
@@ -63,7 +66,7 @@ exports.createSite = async ({ siteId, customDomain }) => {
       }
     ]
   }
-
+  logger.http(`cloudformation: create stack ${stackName}`)
   const { StackId, OperationId } = await client.send(new CreateStackCommand(params))
   return { stackId: StackId, operationId: OperationId }
 }
@@ -74,7 +77,7 @@ exports.updateParams = async (stackId, { siteId, customDomain }) => {
     TemplateBody: template,
     Parameters: generateSiteParameters({ siteId, customDomain })
   })
-
+  logger.http(`cloudformation: update stack ${stackId}`)
   const { StackId, OperationId } = await client.send(cmd)
   return { stackId: StackId, operationId: OperationId }
 }
@@ -92,9 +95,11 @@ exports.updateParams = async (stackId, { siteId, customDomain }) => {
 // TODO: get events
 
 exports.deleteStack = async (siteId) => {
+  const stackName = generateStackName(siteId)
   try {
+    logger.http(`cloudformation: delete stack ${stackName}`)
     await client.send(new DeleteStackCommand({
-      StackName: generateStackName(siteId)
+      StackName: stackName
     }))
   } catch (err) {
     if (err instanceof StackNotFoundException) {

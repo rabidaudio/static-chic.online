@@ -9,6 +9,8 @@ const {
   DeleteCommand
 } = require('@aws-sdk/lib-dynamodb')
 
+const logger = require('./logger').getLogger()
+
 const client = new DynamoDBClient()
 const docClient = DynamoDBDocumentClient.from(client)
 
@@ -19,6 +21,7 @@ exports.put = async (table, data) => {
     TableName: `${tablePrefix}-${table}`,
     Item: data
   })
+  logger.http(`put ${table}`)
   await docClient.send(command)
   return data
 }
@@ -29,10 +32,12 @@ exports.show = async (table, key) => {
     Key: key // e.g. { userId }
   })
   try {
+    logger.http(`dynamo: get ${table} ${key}`)
     const { Item } = await docClient.send(command)
     return Item
   } catch (err) {
     if (err instanceof ResourceNotFoundException) {
+      logger.info(`get ${table} ${key}: not found`)
       return null
     }
     throw err
@@ -54,7 +59,9 @@ exports.query = async (table, partition, { asc, idx } = {}) => {
     KeyConditionExpression: `${partitionKey} = :v1`
   }
   if (idx) params.IndexName = idx
+  logger.http(`dynamo: query ${table}: ${partitionKey} = ${partitionValue} ${asc ? 'asc' : 'desc'}`)
   const { Items } = await docClient.send(new QueryCommand(params))
+  logger.http(`dynamo: query ${table} results: ${(Items || []).length}`)
   return Items || []
 }
 
@@ -78,8 +85,10 @@ exports.scan = async function * (table, filters = {}) {
     }
     params.FilterExpression = filterExpressions.join(' and ')
   }
+  logger.http(`dynamo: scan ${table}: ${params}`)
   while (true) {
     const { Items, LastEvaluatedKey } = await docClient.send(new ScanCommand({ ...params, ExclusiveStartKey: startKey }))
+    logger.http(`dynamo: scan ${table} results: ${Items.length}`)
     for (const item of Items) {
       yield item
     }
@@ -90,12 +99,14 @@ exports.scan = async function * (table, filters = {}) {
 
 exports.delete = async (table, keys) => {
   try {
+    logger.http(`dynamo: delete ${table} ${keys}`)
     await docClient.send(new DeleteCommand({
       TableName: `${tablePrefix}-${table}`,
       Key: keys // e.g. { siteId, deploymentId }
     }))
   } catch (err) {
     if (err instanceof ResourceNotFoundException) {
+      logger.info(`delete ${table} ${keys}: not found`)
       return
     }
     throw err

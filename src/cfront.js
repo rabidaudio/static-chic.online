@@ -4,10 +4,12 @@ const {
   GetInvalidationForDistributionTenantCommand
 } = require('@aws-sdk/client-cloudfront')
 
+const logger = require('./logger').getLogger()
+
 const client = new CloudFrontClient()
 
 exports.invalidate = async (distributionTenantId) => {
-  const cmd = new CreateInvalidationForDistributionTenantCommand({
+  const params = {
     Id: distributionTenantId,
     InvalidationBatch: {
       Paths: {
@@ -16,16 +18,17 @@ exports.invalidate = async (distributionTenantId) => {
       },
       CallerReference: new Date().toISOString()
     }
-  })
-  const { Invalidation } = await client.send(cmd)
+  }
+  logger.http(`cloudfront: create invalidation ${distributionTenantId}`)
+  const { Invalidation } = await client.send(new CreateInvalidationForDistributionTenantCommand(params))
   return Invalidation
 }
 
 exports.getInvalidation = async (distributionTenantId, invalidationId) => {
-  const cmd = new GetInvalidationForDistributionTenantCommand({
+  logger.http(`cloudfront: get invalidation ${distributionTenantId} ${invalidationId}`)
+  const { Invalidation } = await client.send(new GetInvalidationForDistributionTenantCommand({
     DistributionTenantId: distributionTenantId,
     Id: invalidationId
-  })
-  const { Invalidation } = await client.send(cmd)
+  }))
   return Invalidation
 }

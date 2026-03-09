@@ -20,6 +20,7 @@
     "namor": "^3.0.3",
     "serverless-http": "^3.2.0",
     "tar": "^7.5.10",
+    "winston": "^3.19.0",
     "yargs": "^18.0.0"
   },
   "devDependencies": {

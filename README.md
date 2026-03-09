@@ -45,7 +45,6 @@ static-chic.online -> frontend
 
 # TODO
 
-- logger
 - exclude on zip
 - store with git-remote-s3
 - deploy keys

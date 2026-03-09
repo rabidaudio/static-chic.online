@@ -9,6 +9,7 @@ const mime = require('mime-types')
 const namor = require('namor')
 const tar = require('tar')
 
+const logger = require('./logger').getLogger()
 const cfront = require('./cfront')
 const cform = require('./cform')
 const db = require('./db')
@@ -65,7 +66,7 @@ exports.getUser = async (userId) => {
 // a userId which owns it.
 exports.createSite = async ({ name, userId }) => {
   const siteId = generateSiteId()
-  console.log('generating', siteId)
+  logger.info(`generating ${siteId}`)
 
   const { stackId, operationId } = await cform.createSite({ siteId })
 
@@ -106,6 +107,8 @@ exports.getSite = async (siteId) => {
 exports.setSiteCustomDomain = async (siteId, customDomain) => {
   const site = await db.show('sites', { siteId })
 
+  // TODO: domain name must be pointing correctly beforehand!
+
   // TODO: if stack update in progress, error
   const { operationId } = await cform.updateParams(site.stackId, { siteId, customDomain })
   // TODO: determine the dns records necessary for validation
@@ -141,7 +144,7 @@ exports.getDeployment = async ({ siteId, deploymentId }) => {
 exports.createDeployment = async ({ siteId, contentTarball }) => {
   const deploymentId = generateDeployId()
   await s3.upload(deploymentTarballKey(siteId, deploymentId), contentTarball)
-  console.log('create', siteId, deploymentId, contentTarball)
+  logger.info(`create ${siteId}/${deploymentId}`)
   const deployment = await db.put('deployments', {
     deploymentId,
     siteId,
@@ -156,23 +159,23 @@ exports.promoteDeployment = async ({ siteId, deploymentId }) => {
   const deployment = await db.show('deployments', { siteId, deploymentId })
 
   const siteContentPath = siteContentKeyPrefix(siteId)
-  console.log('promoting', siteId, deploymentId)
+  logger.info(`promoting ${siteId}/${deploymentId}`)
 
   // in order to unzip the tarball in place, we need to download it, extract it
   // locally, and upload each file one at a time.
   const tmpDir = await mkdtemp(path.join(tmpdir(), `${process.env.APP_ID}-`))
   const tarballPath = deploymentTarballKey(siteId, deploymentId)
-  console.log('downloading', tarballPath, 'to', tmpDir)
+  logger.info(`downloading ${tarballPath} to ${tmpDir}`)
   const tarball = await s3.download(tarballPath)
   const extract = tar.extract({ cwd: tmpDir, strict: true })
-  console.log('extracting tarball')
+  logger.info('extracting tarball')
   await pipeline(tarball, extract) // wait for extraction to complete
 
-  console.log('deleting live site', siteContentPath)
+  logger.info(`deleting live site ${siteContentPath}`)
   await s3.deleteRecursive(siteContentPath)
 
   // upload the tarball
-  console.log('uploading files')
+  logger.info('uploading files')
   for await (const entry of glob(path.join(tmpDir, '**', '*'))) {
     const s = await stat(entry)
     if (!s.isDirectory()) {
@@ -180,18 +183,18 @@ exports.promoteDeployment = async ({ siteId, deploymentId }) => {
       // if we don't specify the content type, CF will send it as a binary file
       // and the browser will simply download it
       const contentType = mime.contentType(path.extname(entry))
-      console.log('upload', contentType, entry, key)
+      logger.verbose(`upload ${contentType} ${entry} ${key}`)
       await s3.upload(key, createReadStream(entry), { contentType })
     }
   }
 
   if (site.currentDeployment) {
-    console.log('invalidating cache')
+    logger.info('invalidating cache')
     const invalidation = await cfront.invalidate(site.distributionTenantId)
     db.put('deployments', { ...deployment, invalidationId: invalidation.Id })
   }
 
-  console.log('updating site')
+  logger.info('updating site')
   return await db.put('sites', {
     ...site,
     currentDeployment: deploymentId,
@@ -200,32 +203,39 @@ exports.promoteDeployment = async ({ siteId, deploymentId }) => {
 }
 
 exports.deleteSite = async (siteId) => {
+  logger.warn(`deleting site ${siteId}`)
   const deleteDeploymentsForSite = async (siteId) => {
     for (const { deploymentId } in await db.query('deployments', { siteId })) {
+      logger.info(`deleting ${siteId}/${deploymentId}`)
       await db.delete('deployments', { siteId, deploymentId })
     }
   }
   await Promise.all([
     // remove domain + distro
-    cform.deleteStack(siteId).then(() => console.log(`[${siteId}] deleted CloudFormation stack`)),
+    cform.deleteStack(siteId).then(() => logger.info(`[${siteId}] deleted CloudFormation stack`)),
     // delete data from S3
-    s3.deleteRecursive(siteContentKeyPrefix(siteId)).then(() => console.log(`[${siteId}] deleted site content`)),
-    s3.deleteRecursive(siteDeploymentsKeyPrefix(siteId)).then(() => console.log(`[${siteId}] deleted deployment data`)),
+    s3.deleteRecursive(siteContentKeyPrefix(siteId)).then(() => logger.info(`[${siteId}] deleted site content`)),
+    s3.deleteRecursive(siteDeploymentsKeyPrefix(siteId)).then(() => logger.info(`[${siteId}] deleted deployment data`)),
     // delete all deployments from db
-    deleteDeploymentsForSite(siteId).then(() => console.log(`[${siteId}] deleted deployment history`)),
+    deleteDeploymentsForSite(siteId).then(() => logger.info(`[${siteId}] deleted deployment history`)),
     // delete site from db
-    db.delete('sites', { siteId }).then(() => console.log(`[${siteId}] deleted site`))
+    db.delete('sites', { siteId }).then(() => logger.info(`[${siteId}] deleted site`))
   ])
-  console.log('site removed', siteId)
+  logger.info(`site deleted: ${siteId}`)
 }
 
 exports.awaitInvalidationComplete = async ({ siteId, deploymentId }) => {
   const site = await db.show('sites', { siteId })
   const deployment = await db.show('deployments', { siteId, deploymentId })
-  if (!deployment.invalidationId) return
+  if (!deployment.invalidationId) {
+    logger.info(`no invalidations for ${siteId}/${deploymentId}`)
+    return
+  }
 
+  logger.info(`waiting for invalidation ${siteId}/${deploymentId}`)
   while (true) {
     const invalidation = await cfront.getInvalidation(site.distributionTenantId, deployment.invalidationId)
+    logger.info(`invalidation status: ${invalidation.Status}`)
     if (invalidation.Status === 'Completed') return invalidation
     await delay(5000)
   }
@@ -234,20 +244,25 @@ exports.awaitInvalidationComplete = async ({ siteId, deploymentId }) => {
 // create a stream of a .tar.gz of the directory at the provided path.
 // returns a node stream that can be piped to a file or request.
 exports.createTarball = async (directoryPath) => {
+  logger.info(`creating tarball of ${directoryPath}`)
   const filesInDirectory = await Array.fromAsync(glob(path.join(directoryPath, '*')))
   const relativeFiles = filesInDirectory.map((item) => path.relative(directoryPath, item))
+  for (const item of relativeFiles) {
+    logger.info(item)
+  }
   return ReadableStream.from(tar.create({ cwd: directoryPath, gzip: true }, relativeFiles))
 }
 
 exports.wipeEverything = async () => {
   if (process.env.NODE_ENV !== 'dev') throw new Error('Can only destroy dev environments')
 
+  logger.warn('deleting everything!')
   await s3.deleteRecursive('')
   for await (const { siteId } of db.scan('sites')) {
     await this.deleteSite(siteId)
   }
   for await (const { userId } of db.scan('users')) {
     await db.delete('users', { userId })
-    console.log('deleted user', userId)
+    logger.info(`deleted user ${userId}`)
   }
 }

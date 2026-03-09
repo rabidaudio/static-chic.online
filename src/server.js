@@ -1,6 +1,10 @@
 const Koa = require('koa')
 const Router = require('@koa/router')
 
+const { configure: configureLogger, getLogger } = require('./logger')
+configureLogger({ level: 'verbose', pretty: false })
+const logger = getLogger()
+
 const app = require('./app')
 
 const server = new Koa()
@@ -8,11 +12,12 @@ const router = new Router()
 
 // log
 server.use(async (ctx, next) => {
-  console.log(`${ctx.method} ${ctx.url}`)
+  const { method, url } = ctx
+  logger.http({ method, url })
   const start = Date.now()
   await next()
   const ms = Date.now() - start
-  console.log(`[${ctx.status}] ${ctx.method} ${ctx.url} - ${ms}ms\n`)
+  logger.http({ method, url, status: ctx.status, ms })
 })
 
 // server errors
@@ -20,7 +25,7 @@ server.use(async (ctx, next) => {
   try {
     return await next()
   } catch (err) {
-    console.error(err.stack)
+    logger.error(err)
     const errorData = {
       message: 'Server Error'
     }
@@ -39,11 +44,11 @@ router.get('/', async (ctx) => {
   ctx.body = {
     status: 'OK',
     data: {
-      "app": process.env.APP_ID,
-      "env": process.env.NODE_ENV,
-      "distro": process.env.DISTRIBUTION_DOMAIN,
-      "distro_id": process.env.DISTRIBUTION_ID,
-      "connection_group_id": process.env.CONNECTION_GROUP_ID,
+      app: process.env.APP_ID,
+      env: process.env.NODE_ENV,
+      distro: process.env.DISTRIBUTION_DOMAIN,
+      distro_id: process.env.DISTRIBUTION_ID,
+      connection_group_id: process.env.CONNECTION_GROUP_ID
     }
   }
 })
