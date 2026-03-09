@@ -45,20 +45,18 @@ static-chic.online -> frontend
 
 # TODO
 
-- cloudfront
-- custom domains
+- DELETE deployments
+- DELETE site
+- logger
+- exclude on zip
+- rename db create to put
+- store with git-remote-s3
 - deploy keys
 - production deploy
 - Github authentication
 - deploy CLI
 - frontend
-- DELETE deployments
-- DELETE site
-- Cloudfront distro template, new distro for each site
 - add Tags to everything for cost tracking
-- logger
-- exclude on zip
-- rename db create to put
 
 
 https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/private-content-restricting-access-to-s3.html

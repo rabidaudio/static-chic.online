@@ -33,10 +33,10 @@
   },
   "scripts": {
     "serve": "serverless dev",
-    "serve:local": "dotenvx run -- node local_server",
+    "serve:local": "dotenvx run -- node src/local_server",
     "lint": "standard --fix",
     "publish": "serverless deploy",
-    "manage": "dotenvx run -- node admin_cli.js",
+    "manage": "dotenvx run -- node src/admin_cli.js",
     "test": "dotenvx run -- mocha"
   },
   "mocha": {

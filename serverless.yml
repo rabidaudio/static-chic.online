@@ -26,6 +26,10 @@ provider:
   stackTags:
     app: ${self:app}
     stage: ${sls:stage}
+  package:
+    patterns:
+      - src/**
+      - handler.js
   iam:
     role:
       statements:

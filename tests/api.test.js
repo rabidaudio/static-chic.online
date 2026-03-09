@@ -6,7 +6,7 @@ const { buffer } = require('node:stream/consumers')
 const { expect } = require('chai')
 const fetch = require('fetch-vcr')
 
-const { createTarball } = require('../app')
+const { createTarball } = require('../src/app')
 
 // NOTE: these tests are integration tests run against a development deploy
 // (sls:stage=dev) of the actual app. They are recorded using VCR into

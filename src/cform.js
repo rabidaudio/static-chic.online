@@ -4,8 +4,7 @@ const path = require('node:path')
 const {
   CloudFormationClient,
   CreateStackCommand,
-  UpdateStackCommand,
-  DescribeStackSetOperationCommand
+  UpdateStackCommand
 } = require('@aws-sdk/client-cloudformation')
 
 const client = new CloudFormationClient()
