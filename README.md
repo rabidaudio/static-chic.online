@@ -56,6 +56,9 @@ static-chic.online -> frontend
 - DELETE site
 - Cloudfront distro template, new distro for each site
 - add Tags to everything for cost tracking
+- logger
+- exclude on zip
+- rename db create to put
 
 
 https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/private-content-restricting-access-to-s3.html

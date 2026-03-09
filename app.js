@@ -9,6 +9,7 @@ const mime = require('mime-types')
 const namor = require('namor')
 const tar = require('tar')
 
+const cfront = require('./cfront')
 const db = require('./db')
 const s3 = require('./s3')
 
@@ -104,6 +105,8 @@ exports.createDeployment = async ({ siteId, contentTarball }) => {
 // make the deployment live for the site
 exports.promoteDeployment = async ({ siteId, deploymentId }) => {
   const site = await db.show('sites', { siteId })
+  const deployment = await db.show('deployments', { siteId, deploymentId })
+
   const siteContentPath = siteContentKeyPrefix(siteId)
   console.log('promoting', siteId, deploymentId)
 
@@ -113,7 +116,7 @@ exports.promoteDeployment = async ({ siteId, deploymentId }) => {
   const tarballPath = deploymentTarballKey(siteId, deploymentId)
   console.log('downloading', tarballPath, 'to', tmpDir)
   const tarball = await s3.download(tarballPath)
-  const extract = tar.extract({ cwd: tmpDir, strict: true, onReadEntry: console.log.bind(console) })
+  const extract = tar.extract({ cwd: tmpDir, strict: true })
   console.log('extracting tarball')
   await pipeline(tarball, extract) // wait for extraction to complete
 
@@ -134,7 +137,11 @@ exports.promoteDeployment = async ({ siteId, deploymentId }) => {
     }
   }
 
-  // TODO: invalidate CloudFront
+  if (site.currentDeployment) {
+    console.log('invalidating cache')
+    const invalidation = await cfront.invalidate(site.distributionTenantId)
+    db.create('deployments', { ...deployment, invalidationId: invalidation.Id })
+  }
 
   console.log('updating site')
   return await db.create('sites', {
@@ -142,6 +149,20 @@ exports.promoteDeployment = async ({ siteId, deploymentId }) => {
     currentDeployment: deploymentId,
     deployedAt: new Date().toISOString()
   })
+}
+
+const delay = async (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+
+exports.awaitInvalidationComplete = async ({ siteId, deploymentId }) => {
+  const site = await db.show('sites', { siteId })
+  const deployment = await db.show('deployments', { siteId, deploymentId })
+  if (!deployment.invalidationId) return
+
+  while (true) {
+    const invalidation = await cfront.getInvalidation(site.distributionTenantId, deployment.invalidationId)
+    if (invalidation.Status === 'Completed') return invalidation
+    await delay(5000)
+  }
 }
 
 // create a stream of a .tar.gz of the directory at the provided path.

@@ -106,18 +106,20 @@ function main () {
         const deployedSite = await app.promoteDeployment(deployment)
         console.log(deployedSite)
         if (wait) {
-          // TODO: wait until invalidation complete
+          console.log('waiting for invalidation...')
+          const invalidation = await app.awaitInvalidationComplete({ siteId: site, deploymentId: deployment.deploymentId })
+          console.log(invalidation)
         }
       }
     })
 
     .command([
-      'promote [siteId] [deploymentId]',
-      'rollback [siteId] [deploymentId]'
+      'promote [site] [deployment]',
+      'rollback [site] [deployment]'
     ], 'make the distribution live', (yargs) => {
       return yargs
-        .positional('siteId')
-        .positional('deploymentId')
+        .positional('site', { describe: 'the id of the site', alias: 'siteId' })
+        .positional('deployment', { describe: 'the id of the deployment', alias: 'deploymentId' })
         .option('wait', {
           alias: 'w',
           describe: 'wait for the invalidation to complete',
@@ -128,7 +130,9 @@ function main () {
       const site = await app.promoteDeployment({ siteId, deploymentId })
       console.log(site)
       if (wait) {
-        // TODO: wait until invalidation complete
+        console.log('waiting for invalidation...')
+        const invalidation = await app.awaitInvalidationComplete({ siteId, deploymentId })
+        console.log(invalidation)
       }
     })
 
