@@ -48,7 +48,7 @@ const generateDeployId = () => {
 }
 
 exports.createUser = async ({ userId, name }) => {
-  return await db.create('users', {
+  return await db.put('users', {
     userId,
     name,
     createdAt: new Date().toISOString()
@@ -70,7 +70,7 @@ exports.createSite = async ({ name, userId }) => {
   const { stackId, operationId } = await cform.createSite({ siteId })
 
   // TODO: should we create on first deploy instead??
-  return await db.create('sites', {
+  return await db.put('sites', {
     siteId,
     userId,
     name,
@@ -110,7 +110,7 @@ exports.setSiteCustomDomain = async (siteId, customDomain) => {
   const { operationId } = await cform.updateParams(site.stackId, { siteId, customDomain })
   // TODO: determine the dns records necessary for validation
 
-  const updatedSite = await db.create('sites', {
+  const updatedSite = await db.put('sites', {
     ...site,
     customDomain,
     latestOperationId: operationId
@@ -142,7 +142,7 @@ exports.createDeployment = async ({ siteId, contentTarball }) => {
   const deploymentId = generateDeployId()
   await s3.upload(deploymentTarballKey(siteId, deploymentId), contentTarball)
   console.log('create', siteId, deploymentId, contentTarball)
-  const deployment = await db.create('deployments', {
+  const deployment = await db.put('deployments', {
     deploymentId,
     siteId,
     createdAt: new Date().toISOString()
@@ -188,11 +188,11 @@ exports.promoteDeployment = async ({ siteId, deploymentId }) => {
   if (site.currentDeployment) {
     console.log('invalidating cache')
     const invalidation = await cfront.invalidate(site.distributionTenantId)
-    db.create('deployments', { ...deployment, invalidationId: invalidation.Id })
+    db.put('deployments', { ...deployment, invalidationId: invalidation.Id })
   }
 
   console.log('updating site')
-  return await db.create('sites', {
+  return await db.put('sites', {
     ...site,
     currentDeployment: deploymentId,
     deployedAt: new Date().toISOString()

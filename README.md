@@ -47,7 +47,6 @@ static-chic.online -> frontend
 
 - logger
 - exclude on zip
-- rename db create to put
 - store with git-remote-s3
 - deploy keys
 - production deploy

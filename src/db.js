@@ -14,7 +14,7 @@ const docClient = DynamoDBDocumentClient.from(client)
 
 const tablePrefix = process.env.TABLE_PREFIX
 
-exports.create = async (table, data) => {
+exports.put = async (table, data) => {
   const command = new PutCommand({
     TableName: `${tablePrefix}-${table}`,
     Item: data
