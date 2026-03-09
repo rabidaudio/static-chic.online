@@ -35,6 +35,19 @@ server.use(async (ctx, next) => {
   }
 })
 
+router.get('/', async (ctx) => {
+  ctx.body = {
+    status: 'OK',
+    data: {
+      "app": process.env.APP_ID,
+      "env": process.env.NODE_ENV,
+      "distro": process.env.DISTRIBUTION_DOMAIN,
+      "distro_id": process.env.DISTRIBUTION_ID,
+      "connection_group_id": process.env.CONNECTION_GROUP_ID,
+    }
+  }
+})
+
 router.get('/sites/:siteId/deployments', async (ctx) => {
   const deployments = await app.listDeployments(ctx.params.siteId)
   ctx.body = {
