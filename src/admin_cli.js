@@ -2,15 +2,16 @@ const yargs = require('yargs')
 const { hideBin } = require('yargs/helpers')
 const chalk = require('chalk')
 
-const { configure: configureLogger, getLogger } = require('./logger')
+const logger = require('./logger')
 
 // NOTE: these are populated after args are parsed
 let app
 
 const wrap = (cmd) => (argv) => {
   const verbosity = (argv.v instanceof Array ? argv.v : [argv.v])
-    .map(v => v ? 1 : 0).reduce((a,b)=>a+b, 0)
-  configureLogger({ level: (verbosity + 1), pretty: true })
+    .map(v => v ? 1 : 0).reduce((a, b) => a + b, 0)
+  const level = ['warn', 'info', 'http', 'verbose'][verbosity] || 'verbose'
+  logger.configure({ level, pretty: true })
   app = require('./app')
   return cmd(argv)
 }
@@ -52,18 +53,18 @@ async function addCustomDomain ({ site, domain, wait }) {
     if (err instanceof app.DomainValidationFailedError) {
       switch (err.code) {
         case 'NOT_FOUND':
-          console.error(chalk.red("DNS record not found."))
+          console.error(chalk.red('DNS record not found.'))
           break
         case 'INVALID':
-          console.error(chalk.red("DNS record improperly set."))
+          console.error(chalk.red('DNS record improperly set.'))
           break
         default:
-          console.error(chalk.red("Unable to verify DNS record."))
+          console.error(chalk.red('Unable to verify DNS record.'))
           break
       }
       console.error("The custom domain's DNS record must be set before adding to the site.")
       console.log(`Create a CNAME record for ${domain} with a value of \`${err.target}\` and try again.`)
-      console.log("If you have already created the record, it may take a few minutes to take effect.")
+      console.log('If you have already created the record, it may take a few minutes to take effect.')
     }
   }
   // if (wait) {
@@ -84,7 +85,7 @@ async function listDeployments ({ site }) {
 
 async function deploy ({ path, site, exclude, promote, wait }) {
   console.log('zipping and uploading...')
-  const contentTarball = await app.createTarball(path) // TODO: exclude
+  const contentTarball = await app.createTarball(path, exclude)
   const deployment = await app.createDeployment({ siteId: site, contentTarball })
   console.log(deployment)
   if (promote) {
@@ -181,7 +182,7 @@ function main () {
         .positional('site', { describe: 'the siteId to deploy to' })
         .positional('path', { describe: 'The path to the root directory of static files' })
         .option('exclude', { alias: 'x', describe: 'a glob of files relative to `path` to exclude', type: 'array', default: [] })
-        .option('promote', { alias: 'p', describe: "Also promote the deployment.\nA deployment isn't automatically promoted to live by default", type: 'boolean'})
+        .option('promote', { alias: 'p', describe: "Also promote the deployment.\nA deployment isn't automatically promoted to live by default", type: 'boolean' })
         .option('wait', { alias: 'w', describe: 'wait for the invalidation to complete (if also promoting)', type: 'boolean' })
     }, wrap(deploy))
 

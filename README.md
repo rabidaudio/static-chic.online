@@ -1,9 +1,9 @@
-# static-chic.online
+# [static-chic.online](https://static-chic.online)
 
 A multi-tenant static site host. Sites are stored in S3 buckets and served via CloudFront. Supports custom domains and arbitrary rollbacks.
 
 ```bash
-npm run manage # admin management cli
+./bin/admin # admin management cli
 npm run serve # run a local tunnel to test API
 npm run publish # deploy
 npx sls logs -f api # show logs
@@ -39,10 +39,6 @@ curl -X POST \
 # Rollback is as simple as promoting a previous deployment
 ```
 
-<subdomain>.sites.static-chic.online
-api.static-chic.online
-static-chic.online -> frontend 
-
 # TODO
 
 - exclude on zip
@@ -51,8 +47,9 @@ static-chic.online -> frontend
 - production deploy
 - Github authentication
 - deploy CLI
+- swap CF with manual creates
 - frontend
 - add Tags to everything for cost tracking
 - flag for private-only in sls to disable github logins
 - json vs text outputs from cli
-  
+- complete integration tests

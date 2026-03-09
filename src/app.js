@@ -106,7 +106,7 @@ exports.getSite = async (siteId) => {
 }
 
 class DomainValidationFailedError extends Error {
-  constructor(message, options) {
+  constructor (message, options) {
     super(message, options)
     this.code = options.code
     this.target = options.target
@@ -130,12 +130,12 @@ exports.verifyCustomDomain = async (siteId, customDomain) => {
     throw new DomainValidationFailedError('record has incorrect value', { code: 'INVALID', target, results })
   } catch (err) {
     if (err.code === 'ENOTFOUND') {
-      throw new DomainValidationFailedError("domain name has no records", { code: "NOT_FOUND", target, cause: err })
+      throw new DomainValidationFailedError('domain name has no records', { code: 'NOT_FOUND', target, cause: err })
     }
     if (err.code === 'ENODATA') {
-      throw new DomainValidationFailedError("domain name has non-CNAME records", { code: "NOT_FOUND", target, cause: err })
+      throw new DomainValidationFailedError('domain name has non-CNAME records', { code: 'NOT_FOUND', target, cause: err })
     }
-    throw new DomainValidationFailedError(err.message, { code: 'UNKNOWN', target, cause: err})
+    throw new DomainValidationFailedError(err.message, { code: 'UNKNOWN', target, cause: err })
   }
 }
 
@@ -221,7 +221,11 @@ exports.promoteDeployment = async ({ siteId, deploymentId }) => {
     }
   }
 
-  if (site.currentDeployment) {
+  if (!site.distributionTenantId) {
+    const { stackId, operationId } = await cform.createSite({ siteId })
+    site.stackId = stackId
+    site.latestOperationId = operationId
+  } else if (site.currentDeployment) {
     logger.info('invalidating cache')
     const invalidation = await cfront.invalidate(site.distributionTenantId)
     db.put('deployments', { ...deployment, invalidationId: invalidation.Id })
@@ -276,14 +280,14 @@ exports.awaitInvalidationComplete = async ({ siteId, deploymentId }) => {
 
 // create a stream of a .tar.gz of the directory at the provided path.
 // returns a node stream that can be piped to a file or request.
-exports.createTarball = async (directoryPath) => {
+exports.createTarball = async (directoryPath, exclude = []) => {
   logger.info(`creating tarball of ${directoryPath}`)
-  const filesInDirectory = await Array.fromAsync(glob(path.join(directoryPath, '*')))
-  const relativeFiles = filesInDirectory.map((item) => path.relative(directoryPath, item))
-  for (const item of relativeFiles) {
+  const filesInDirectory = await Array.fromAsync(glob('**/*', { cwd: directoryPath, exclude }))
+  // const relativeFiles = filesInDirectory.map((item) => path.relative(directoryPath, item))
+  for (const item of filesInDirectory) {
     logger.info(item)
   }
-  return ReadableStream.from(tar.create({ cwd: directoryPath, gzip: true }, relativeFiles))
+  return ReadableStream.from(tar.create({ cwd: directoryPath, gzip: true }, filesInDirectory))
 }
 
 exports.wipeEverything = async () => {

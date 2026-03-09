@@ -13,11 +13,11 @@ const router = new Router()
 // log
 server.use(async (ctx, next) => {
   const { method, url } = ctx
-  logger.http({ method, url })
+  logger.http(`${method} ${url}`)
   const start = Date.now()
   await next()
   const ms = Date.now() - start
-  logger.http({ method, url, status: ctx.status, ms })
+  logger.http(`${method} ${url} ${ctx.status} [${ms}ms]`)
 })
 
 // server errors
@@ -25,7 +25,7 @@ server.use(async (ctx, next) => {
   try {
     return await next()
   } catch (err) {
-    logger.error(err)
+    logger.error('unhandled server error', err)
     const errorData = {
       message: 'Server Error'
     }

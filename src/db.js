@@ -85,7 +85,7 @@ exports.scan = async function * (table, filters = {}) {
     }
     params.FilterExpression = filterExpressions.join(' and ')
   }
-  logger.http(`dynamo: scan ${table}: ${params}`)
+  logger.http(`dynamo: scan ${table}`, params)
   while (true) {
     const { Items, LastEvaluatedKey } = await docClient.send(new ScanCommand({ ...params, ExclusiveStartKey: startKey }))
     logger.http(`dynamo: scan ${table} results: ${Items.length}`)
@@ -99,14 +99,14 @@ exports.scan = async function * (table, filters = {}) {
 
 exports.delete = async (table, keys) => {
   try {
-    logger.http(`dynamo: delete ${table} ${keys}`)
+    logger.http(`dynamo: delete ${table}`, keys)
     await docClient.send(new DeleteCommand({
       TableName: `${tablePrefix}-${table}`,
       Key: keys // e.g. { siteId, deploymentId }
     }))
   } catch (err) {
     if (err instanceof ResourceNotFoundException) {
-      logger.info(`delete ${table} ${keys}: not found`)
+      logger.info(`delete ${table}: not found`, keys)
       return
     }
     throw err
