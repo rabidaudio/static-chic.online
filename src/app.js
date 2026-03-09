@@ -1,3 +1,4 @@
+const dns = require('node:dns/promises')
 const path = require('node:path')
 const { randomBytes } = require('node:crypto')
 const { createReadStream } = require('node:fs')
@@ -64,7 +65,7 @@ exports.getUser = async (userId) => {
 // a randomly generated subdomain like `estate-specify-07euk`,
 // a deploy key used to authenticate deployments, a name,
 // a userId which owns it.
-exports.createSite = async ({ name, userId }) => {
+exports.createSite = async ({ name, userId, customDomain }) => {
   const siteId = generateSiteId()
   logger.info(`generating ${siteId}`)
 
@@ -104,14 +105,46 @@ exports.getSite = async (siteId) => {
   return { ...site, deployKey: '<obfuscated>' }
 }
 
+class DomainValidationFailedError extends Error {
+  constructor(message, options) {
+    super(message, options)
+    this.code = options.code
+    this.target = options.target
+    if (options.results) this.results = options.results
+  }
+}
+exports.DomainValidationFailedError = DomainValidationFailedError
+
+// Check if the customDomain is pointing correctly. Will throw a DomainValidationFailedError
+// if not, return silently if verified
+exports.verifyCustomDomain = async (siteId, customDomain) => {
+  // TODO: does it have to be the cloudfront domain?
+  // if we set it to cloudfront instead, it could be set at create time...
+  const target = `${siteId}.${process.env.SITES_DOMAIN}`
+  try {
+    const results = await dns.resolveCname(customDomain)
+    if (results.length === 0) {
+      throw new DomainValidationFailedError('record has no value', { code: 'INVALID', target })
+    }
+    if (results[0] === target) return // ok
+    throw new DomainValidationFailedError('record has incorrect value', { code: 'INVALID', target, results })
+  } catch (err) {
+    if (err.code === 'ENOTFOUND') {
+      throw new DomainValidationFailedError("domain name has no records", { code: "NOT_FOUND", target, cause: err })
+    }
+    if (err.code === 'ENODATA') {
+      throw new DomainValidationFailedError("domain name has non-CNAME records", { code: "NOT_FOUND", target, cause: err })
+    }
+    throw new DomainValidationFailedError(err.message, { code: 'UNKNOWN', target, cause: err})
+  }
+}
+
 exports.setSiteCustomDomain = async (siteId, customDomain) => {
+  await this.verifyCustomDomain(siteId, customDomain)
+
   const site = await db.show('sites', { siteId })
-
-  // TODO: domain name must be pointing correctly beforehand!
-
   // TODO: if stack update in progress, error
   const { operationId } = await cform.updateParams(site.stackId, { siteId, customDomain })
-  // TODO: determine the dns records necessary for validation
 
   const updatedSite = await db.put('sites', {
     ...site,

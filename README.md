@@ -54,3 +54,5 @@ static-chic.online -> frontend
 - frontend
 - add Tags to everything for cost tracking
 - flag for private-only in sls to disable github logins
+- json vs text outputs from cli
+  

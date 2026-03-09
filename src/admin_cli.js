@@ -1,16 +1,16 @@
 const yargs = require('yargs')
 const { hideBin } = require('yargs/helpers')
+const chalk = require('chalk')
 
 const { configure: configureLogger, getLogger } = require('./logger')
 
 // NOTE: these are populated after args are parsed
-let logger
 let app
 
 const wrap = (cmd) => (argv) => {
-  const logLevel = (argv.vv) ? 'verbose' : (argv.v ? 'info' : 'warn')
-  configureLogger({ level: logLevel, pretty: true })
-  logger = getLogger()
+  const verbosity = (argv.v instanceof Array ? argv.v : [argv.v])
+    .map(v => v ? 1 : 0).reduce((a,b)=>a+b, 0)
+  configureLogger({ level: (verbosity + 1), pretty: true })
   app = require('./app')
   return cmd(argv)
 }
@@ -26,15 +26,11 @@ async function getUser ({ username }) {
 }
 
 async function addUser ({ username, name }) {
-  // TODO: auth tokens?
-
   const user = await app.createUser({ userId: username, name })
   console.log(user)
 }
 
 async function listSites ({ username }) {
-  // TODO: auth tokens?
-
   const sites = await app.listSitesForUser(username)
   console.log(sites)
 }
@@ -49,8 +45,27 @@ async function addSite ({ owner, name, wait }) {
 }
 
 async function addCustomDomain ({ site, domain, wait }) {
-  const updatedSite = await app.setSiteCustomDomain(site, domain)
-  console.log(updatedSite)
+  try {
+    const updatedSite = await app.setSiteCustomDomain(site, domain)
+    console.log(updatedSite)
+  } catch (err) {
+    if (err instanceof app.DomainValidationFailedError) {
+      switch (err.code) {
+        case 'NOT_FOUND':
+          console.error(chalk.red("DNS record not found."))
+          break
+        case 'INVALID':
+          console.error(chalk.red("DNS record improperly set."))
+          break
+        default:
+          console.error(chalk.red("Unable to verify DNS record."))
+          break
+      }
+      console.error("The custom domain's DNS record must be set before adding to the site.")
+      console.log(`Create a CNAME record for ${domain} with a value of \`${err.target}\` and try again.`)
+      console.log("If you have already created the record, it may take a few minutes to take effect.")
+    }
+  }
   // if (wait) {
   //   console.log("waiting...")
   //   await app.waitForStack(updatedSite, (status) => console.log(status))
@@ -160,31 +175,14 @@ function main () {
         .positional('site', { describe: 'the siteId' })
     }, wrap(listDeployments))
 
-    .command('deploy [path]', 'create a deployment to the given site', (yargs) => {
+    .command('deploy [site] [path]', 'create a deployment to the given site', (yargs) => {
       return yargs
-        .example("deploy myapp/dist --site [siteId] --exclude '**/*.test.js'")
+        .example("deploy [siteId] myapp/dist --exclude '**/*.test.js'")
+        .positional('site', { describe: 'the siteId to deploy to' })
         .positional('path', { describe: 'The path to the root directory of static files' })
-        .option('site', {
-          alias: 's',
-          describe: 'the siteId to deploy to'
-        })
-        .option('exclude', {
-          alias: 'x',
-          describe: 'a glob of files relative to `path` to exclude',
-          type: 'array',
-          default: []
-        })
-        .option('promote', {
-          alias: 'p',
-          describe: "Also promote the deployment.\nA deployment isn't automatically promoted to live by default",
-          type: 'boolean'
-        })
-        .option('wait', {
-          alias: 'w',
-          describe: 'wait for the invalidation to complete (if also promoting)',
-          type: 'boolean'
-        })
-        .demandOption(['site'])
+        .option('exclude', { alias: 'x', describe: 'a glob of files relative to `path` to exclude', type: 'array', default: [] })
+        .option('promote', { alias: 'p', describe: "Also promote the deployment.\nA deployment isn't automatically promoted to live by default", type: 'boolean'})
+        .option('wait', { alias: 'w', describe: 'wait for the invalidation to complete (if also promoting)', type: 'boolean' })
     }, wrap(deploy))
 
     .command([
@@ -194,32 +192,17 @@ function main () {
       return yargs
         .positional('site', { describe: 'the id of the site', alias: 'siteId' })
         .positional('deployment', { describe: 'the id of the deployment', alias: 'deploymentId' })
-        .option('wait', {
-          alias: 'w',
-          describe: 'wait for the invalidation to complete',
-          type: 'boolean'
-        })
+        .option('wait', { alias: 'w', describe: 'wait for the invalidation to complete', type: 'boolean' })
     }, wrap(promote))
 
   if (process.env.NODE_ENV === 'dev') {
     cli = cli.command('wipe_everything', 'delete all sites, deployments, and users',
-      (yargs) => yargs,
-      wrap(async () => await app.wipeEverything()))
+      (yargs) => yargs, wrap(async () => await app.wipeEverything()))
   }
 
   cli.help('h')
     .alias('h', 'help')
-    .option('verbose', {
-      alias: 'v',
-      describe: 'Verbose logging (to stderr)',
-      type: 'boolean',
-      default: false
-    })
-    .option('vv', {
-      describe: 'Extra-verbose',
-      type: 'boolean',
-      default: false
-    })
+    .option('verbose', { alias: 'v', describe: 'Verbose logging (to stderr)' })
     .demandCommand(1, 1, 'command required')
     .parse()
 }
