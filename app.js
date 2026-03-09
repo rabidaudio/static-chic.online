@@ -10,8 +10,11 @@ const namor = require('namor')
 const tar = require('tar')
 
 const cfront = require('./cfront')
+const cform = require('./cform')
 const db = require('./db')
 const s3 = require('./s3')
+
+const delay = async (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
 // where deployments are stored on S3
 const deploymentTarballKey = (siteId, deploymentId) =>
@@ -60,19 +63,59 @@ exports.getUser = async (userId) => {
 // a deploy key used to authenticate deployments, a name,
 // a userId which owns it.
 exports.createSite = async ({ name, userId }) => {
+  const siteId = generateSiteId()
+  console.log("generating", siteId)
+
+  const { stackId, operationId } = await cform.createSite({ siteId })
+
+  // TODO: should we create on first deploy instead??
   return await db.create('sites', {
-    siteId: generateSiteId(),
+    siteId,
     userId,
     name,
+    stackId,
+    latestOperationId: operationId,
     deployKey: generateDeployKey(),
     createdAt: new Date().toISOString()
   })
-  // TODO: create CloudFront tenant
 }
+
+// exports.waitForStack = async (site, callback = () => {}) => {
+//   if (!site.latestOperationId) return
+
+//   while (true) {
+//     const operation = await cform.getStackStatus(site.siteId, site.latestOperationId)
+//     callback(operation.Status)
+    
+//     switch (operation.Status) {
+//       case 'SUCCEEDED': return operation
+//       case 'FAILED': throw new Error("Stack failed") // TODO: get error info
+//       case 'STOPPED': throw new Error("Stack was stopped")
+//       // QUEUED, RUNNING, STOPPING
+//     }
+//     await delay(5000)
+//   }
+// }
 
 exports.getSite = async (siteId) => {
   const site = await db.show('sites', { siteId })
   return { ...site, deployKey: '<obfuscated>' }
+}
+
+exports.setSiteCustomDomain = async (siteId, customDomain) => {
+  const site = await db.show('sites', { siteId })
+
+  // TODO: if stack update in progress, error
+  const { operationId } = await cform.updateParams(site.stackId, { siteId, customDomain })
+  // TODO: determine the dns records necessary for validation
+
+  const updatedSite = await db.create('sites', {
+    ...site,
+    customDomain,
+    latestOperationId: operationId,
+  })
+
+  return { ...updatedSite, deployKey: '<obfuscated>' }
 }
 
 exports.listSitesForUser = async (userId) => {
@@ -150,8 +193,6 @@ exports.promoteDeployment = async ({ siteId, deploymentId }) => {
     deployedAt: new Date().toISOString()
   })
 }
-
-const delay = async (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
 exports.awaitInvalidationComplete = async ({ siteId, deploymentId }) => {
   const site = await db.show('sites', { siteId })

@@ -67,6 +67,9 @@ provider:
     STAGE: ${sls:stage}
     SITES_DOMAIN: ${param:sitesDomain}
     HOSTED_ZONE_ID: ${param:hostedZoneId}
+    DISTRIBUTION_ID: !Ref CloudfrontDistro
+    CONNECTION_GROUP_ID: !GetAtt CloudfrontDistroDefaultConnectionGroup.Id
+    DISTRIBUTION_DOMAIN: !GetAtt CloudfrontDistroDefaultConnectionGroup.RoutingEndpoint
 
 functions:
   api:
@@ -242,33 +245,3 @@ resources:
         DomainValidationOptions:
           - DomainName: ${param:sitesDomain}
             HostedZoneId: ${param:hostedZoneId}
-
-    # TEST
-    MyDistributionTenant:
-      Type: AWS::CloudFront::DistributionTenant
-      Properties:
-        Enabled: true
-        ConnectionGroupId:
-          Fn::GetAtt: [CloudfrontDistroDefaultConnectionGroup, Id]
-        Domains:
-          - "ride-impede-dwoxv.${param:sitesDomain}"
-          - "test-site.rabid.audio"
-        DistributionId:
-          Ref: CloudfrontDistro
-        Name: ride-impede-dwoxv
-        Parameters:
-          - Name: siteId
-            Value: ride-impede-dwoxv
-        # if custom domain
-        ManagedCertificateRequest:
-          PrimaryDomainName: test-site.rabid.audio
-          ValidationTokenHost: cloudfront
-    MyDistributionTenantDomain:
-      Type: AWS::Route53::RecordSet
-      Properties:
-        HostedZoneId: ${param:hostedZoneId}
-        Name: "ride-impede-dwoxv.${param:sitesDomain}"
-        Type: CNAME
-        TTL: 300
-        ResourceRecords:
-          - Fn::GetAtt: [CloudfrontDistroDefaultConnectionGroup, RoutingEndpoint]

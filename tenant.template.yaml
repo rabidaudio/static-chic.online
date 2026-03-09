@@ -1,0 +1,72 @@
+Parameters:
+  SitesDomain:
+    Description: The base domain for all sites, e.g. sites.static-chic.online
+    Type: String
+  HostedZoneId:
+    Description: The ID of the hosted zone of the core domain to create dns records in
+    Type: String
+  DistributionId:
+    Description: The ID of the parent multi-tenant distribution
+    Type: String
+  ConnectionGroupId:
+    Description: The ID of the connection group of the distribution
+    Type: String
+  DistributionDomain:
+    Description: The domain of the Cloudfront Distribution, e.g. xxxxx.cloudfront.net
+    Type: String
+  SiteId:
+    Description: The unique subdomain and SiteId, e.g. lovely-onions-12345
+    Type: String
+  CustomDomain:
+    Description: A custom external domain which is a CNAME for the subdomain
+    Type: String
+    Default: ""
+
+Conditions:
+  HasCustomDomain: !Not [!Equals [!Ref CustomDomain, '']]
+
+Resources:
+  DistributionTenant:
+    Type: AWS::CloudFront::DistributionTenant
+    Properties:
+      Enabled: true
+      ConnectionGroupId: !Ref ConnectionGroupId
+      Domains:
+        - !Join
+          - '.'
+          - - !Ref SiteId
+            - !Ref SitesDomain
+        - !If
+          # Condition
+          - HasCustomDomain
+          # TrueValue
+          - !Ref CustomDomain
+          # FalseValue
+          - !Ref AWS::NoValue
+      DistributionId: !Ref DistributionId
+      Name: !Ref SiteId
+      Parameters:
+        - Name: siteId
+          Value: !Ref SiteId
+      # if custom domain
+      ManagedCertificateRequest:
+        !If
+          # Condition
+          - HasCustomDomain
+          # TrueValue
+          - PrimaryDomainName: !Ref CustomDomain
+            ValidationTokenHost: cloudfront
+          # FalseValue
+          - !Ref AWS::NoValue
+  DistributionTenantDomain:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneId: !Ref HostedZoneId
+      Name: !Join
+        - '.'
+        - - !Ref SiteId
+          - !Ref SitesDomain
+      Type: CNAME
+      TTL: 300
+      ResourceRecords:
+        - !Ref DistributionDomain

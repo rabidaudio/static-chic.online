@@ -52,10 +52,45 @@ function main () {
           alias: 'n',
           describe: 'The name of the site'
         })
-        .demandOption(['o', 'n'])
-    }, async ({ name, owner }) => {
+        // TODO: custom domain
+        .option('wait', {
+          alias: 'w',
+          describe: "wait for the CloudFront distribution to activate",
+        })
+        .demandOption(['owner', 'name'])
+    }, async ({ owner, name, wait }) => {
       const site = await app.createSite({ name, userId: owner })
       console.log(site)
+      if (wait) {
+        console.log("waiting...")
+        await app.waitForStack(site, (status) => console.log(status))
+      }
+    })
+
+    // NOTE: domain name must be pointing correctly beforehand!
+    .command('add_custom_domain', 'add a custom domain to a site', (yargs) => {
+      return yargs
+        .example('add_custom_domain -s [siteId] -d example.com')
+        .option('site', {
+          alias: 's',
+          describe: 'the siteId'
+        })
+        .option('domain', {
+          alias: 'd',
+          describe: 'the custom domain'
+        })
+        .option('wait', {
+          alias: 'w',
+          describe: "wait for the CloudFront distribution to activate",
+        })
+        .demandOption(['site', 'domain'])
+    }, async ({ site, domain, wait }) => {
+      const updatedSite = await app.setSiteCustomDomain(site, domain)
+      console.log(updatedSite)
+      // if (wait) {
+      //   console.log("waiting...")
+      //   await app.waitForStack(updatedSite, (status) => console.log(status))
+      // }
     })
 
     .command('list_deployments [site]', 'list all the deployments for a site', (yargs) => {
