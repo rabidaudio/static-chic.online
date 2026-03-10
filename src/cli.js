@@ -4,137 +4,74 @@ const prompts = require('@inquirer/prompts')
 const chalk = require('chalk')
 
 const isInteractive = require('is-interactive').default()
-const supportsColor = require('supports-color').default.stdout
 
 // cmd is a middleware pattern for orchestrating cli commands
-const cmd = function(initialMiddleware = async (argv, next) => next(argv)) {
-    const _cmd = async (argv) => {
-        const cont = (rem) => async (...args) => {
-            if (rem.length === 0) return
-            const [m, ...rest] = rem
-            return await m((args.length >= 1 ? args[0] : argv), cont(rest))
-        }
-        return await cont(_cmd._middleware)(argv)
+const noOpMiddleware = async (argv, next) => next(argv)
+const cmd = (initialMiddleware = noOpMiddleware) => {
+  const _cmd = async (argv) => {
+    const cont = (rem) => async (...args) => {
+      if (rem.length === 0) return
+      const [m, ...rest] = rem
+      return await m((args.length >= 1 ? args[0] : argv), cont(rest))
     }
-    _cmd._middleware = [initialMiddleware]
-    _cmd.use = (middleware) => {
-        _cmd._middleware.push(middleware)
-        return _cmd
-    }
+    return await cont(_cmd._middleware)(argv)
+  }
+  _cmd._middleware = [initialMiddleware]
+  _cmd.use = (middleware) => {
+    _cmd._middleware.push(middleware)
     return _cmd
+  }
+  _cmd.do = _cmd.use // alias
+  return _cmd
 }
 
-//     for (const [name, extension] of Object.entries(cmd.extensions)) {
-//         _cmd.
-//     }
-// cmd.extensions = []
-// cmd.extend = (extender) => cmd.extensions.push(extender)
-
-
-// cli.extend({
-//     demandOption: (name, checkFn = (v) => !!v) => async (argv, next) => {
-//         if (!checkFn(argv[name])) {
-//             console.error(`Missing required argument: ${name}`)
-//             process.exit(1)
-//         } else {
-//             return await next(argv)
-//         }
-//     },
-// })
-
-const.demandOption = (name, checkFn = (v) => !!v) => a
+const demandOption = (option, checkFn = (v) => !!v) => async (argv, next) => {
+  if (!checkFn(argv[option])) {
+    console.error(`Missing required argument: ${option}`)
+    process.exit(1)
+  } else {
+    return await next(argv)
+  }
+}
 
 const requestOption = (option, requestFn) => async (argv, next) => {
-    if (argv[option]) return await next()
-    const resolved = await requestFn(argv)
-    return await next({ ...argv, [option]: resolved })
+  if (argv[option]) return await next()
+  argv[option] = await requestFn(argv)
+  return await next()
 }
-})
 
-// const cli = function () { // TODO: allow specifying first use as argument
-//     const fn = async (argv) => {
-//         // Top invoke
-//         console.log('top invoke', argv, fn._next)
-//         if (fn._next)
-//             return await fn._next(argv)
-//     }
-//     fn._next = null
-//     const attachUse = (fn) => {
-//         fn.use = function (middleware) {
-//             // set fn.next to be this
-//             fn._next = async function (argv) {
-//                 console.log('invoke middleware', argv)
-//                 const next = this._next || (async (_argv) => {})
-//                 return await middleware(argv, async () => next(argv))
-//             }
-//             // set fn.use to be this function's use
-//             fn.use = attachUse(fn._next)
-//         }        
-//     }
-//     attachUse(fn)
-//     return fn
-// }
-
-    // .chain(authenticate)
-    // .requestOption('site', async () => {
-
-    // })
-    // .demandOption('site')
-    // .chain(async (argv, next) => {
-
-    // })
-
-// const cli = new CLI(yargs)
-//     .cmd('init', authenticate, requireSite, async ({ name }) => {
-//         // authenticate
-//         // new site (--name or interactive or null)
-//         // return new subdomain+deploy_key
-//     })
-
-
-const authenticate = async () => {
+const authenticateUser = async (argv, next) => {
+  console.log('authenticateUser')
   // check auth token in localStorage
   //  exists? return it
   // interactive? go through login flow
   // throw error token or deploy key is required
   // TODO: support non-interactive registration?
+  return await next(argv)
 }
 
-const demandOption = (name, checkFn = (v) => !!v) => async (argv, next) => {
-    if (!checkFn(argv[name])) {
-        console.error(`Missing required argument: ${name}`)
-        process.exit(1)
-    } else {
-        return await next(argv)
-    }
-}
-
-const requestOption = (option, requestFn) => async (argv, next) => {
-    if (argv[option]) return await next()
-    const resolved = await requestFn(argv)
-    return await next({ ...argv, [option]: resolved })
+const authenticateUserOrToken = async (argv, next) => {
+  console.log('authenticateUserOrToken')
+  return await next(argv)
 }
 
 const requestSite = requestOption('site', async () => {
-    if (isInteractive) {
-        // TODO: get the user's sites
-        return await prompts.select({
-            message: 'Select a site',
-            choices: [
-                { name: 'Test Site [teeny-angle-dwas5]', value: 'teeny-angle-dwas5', description: 'created today' },
-                { name: 'Test Site 2 [example.com]', value: 'foo-bar-baz', description: 'updated 1 year ago' }
-            ]
-            })
-    }
+  if (isInteractive) {
+    // TODO: get the user's sites
+    return await prompts.select({
+      message: 'Select a site',
+      choices: [
+        { name: 'Test Site [teeny-angle-dwas5]', value: 'teeny-angle-dwas5', description: 'created today' },
+        { name: 'Test Site 2 [example.com]', value: 'foo-bar-baz', description: 'updated 1 year ago' }
+      ]
+    })
+  }
 })
 
-const requestDeployment = requestOption('deployment', async () => {
-
-})
-
-module.exports = async function main () {
-  const yargs = yargs(hideBin(process.argv))
+module.exports = async function main (inArgv = process.argv) {
+  const cli = yargs(hideBin(inArgv))
     .scriptName('statchic') // TODO
+
     .usage(`${chalk.bold('$0')}   ` +
         chalk.green('Create and deploy static sites on', chalk.underline('static-chic.online') + '.\n\n') +
 
@@ -159,26 +96,30 @@ module.exports = async function main () {
         'pointing this domain to the default domain for the site before you can attach it to the site. ' +
         'Contact your DNS provider for directions.\n\n')
     )
-  yargs.siteOption = function () {
+  cli.siteOption = function () {
     return this.option('site', {
       alias: 's',
       type: 'string',
       describe: 'The site subdomain, e.g. `teeny-angle-dwas5`'
-    }).unwrappedDefault('site', async () => {
-      if (process.env.SC_SITE_ID) return process.env.SC_SITE_ID
-    }, '$SC_SITE_ID').demandOption('site')
+    })
+      .default('site', () => {
+        if (process.env.SC_SITE_ID) return process.env.SC_SITE_ID
+      }, '$SC_SITE_ID')
   }
 
-  yargs.command('init', chalk.bold('Create a new site.'), y =>
+  cli.command('init', chalk.bold('Create a new site.'), y =>
     y.option('name', {
       alias: 'n',
       describe: 'A name for the site'
-    }).unwrappedDefault('name', async () => {
+    }), cmd()
+    .use(authenticateUser)
+    .use(requestOption('name', async () => {
       if (isInteractive) {
         return await prompts.input({ message: 'Enter a name for the site:', required: false })
       }
-      return null
-    }, 'none'))
+    }))
+    .do(init)
+  )
 
     .command('configure', chalk.bold('Change the settings of a site.'), y =>
       y.example('configure --site teeny-angle-dwas5 --domain example.com')
@@ -189,9 +130,14 @@ module.exports = async function main () {
           boolean: true,
           describe: 'Add a custom domain to the site. Remove it by setting to blank or using `--no-domain`'
         })
-        .coerce('domain', (arg) => (typeof arg === 'boolean' ? null : (arg === '' ? null : arg))))
+        .coerce('domain', (arg) => (typeof arg === 'boolean' ? null : (arg === '' ? null : arg))),
+    cmd()
+      .use(authenticateUserOrToken)
+      .use(requestSite)
+      .use(demandOption('site'))
+      .do(configure))
 
-    .command('deploy [path]', chalk.bold('Create a new deployment for the site.\n\n') +
+    .command('deploy [path]', chalk.bold('Create a new deployment for the site.\n') +
         chalk.dim('A deployment isn\'t automatically promoted to live by default. Use the ' +
         '`promote` command or the `--promote` flag to promote after deployment.'), y =>
       y.example('deploy --site teeny-angle-dwas5 --promote --wait myapp/dist')
@@ -201,34 +147,46 @@ module.exports = async function main () {
         .option('promote', { alias: 'p', describe: 'promote after deployment', type: 'boolean' })
         .option('wait', { alias: 'w', describe: 'wait for the invalidation to complete (if also promoting)', type: 'boolean' })
         .demandOption('path')
-        .implies('wait', 'promote'))
+        .implies('wait', 'promote'),
+    cmd()
+      .use(authenticateUserOrToken)
+      .use(requestSite)
+      .use(demandOption('site'))
+      .do(deploy))
 
-  // authenticate user or deploykey
-  // siteId/deployId
-  .command('promote [deployment]', chalk.bold('Make a deployment live.'), y =>
-    y.example("promote --wait --site teeny-angle-dwas5 0000019cd5515615dd304c19")
-    .siteOption()
-    .positional('deployment', {
-        describe: 'The ID of the deployment to promote, e.g. `0000019cd5515615dd304c19`.'
-    }).unwrappedDefault('deployment', async () => {
-        if (process.env.SC_DEPLOY_ID) return process.env.SC_DEPLOY_ID
+    .command('promote [deployment]', chalk.bold('Make a deployment live.'), y =>
+      y.example('promote --wait --site teeny-angle-dwas5 0000019cd5515615dd304c19')
+        .siteOption()
+        .positional('deployment', {
+          describe: 'The ID of the deployment to promote, e.g. `0000019cd5515615dd304c19`.'
+        }).default('deployment', () => {
+          if (process.env.SC_DEPLOY_ID) return process.env.SC_DEPLOY_ID
+        }, '$SC_DEPLOY_ID')
+        .option('wait', { alias: 'w', describe: 'wait for the invalidation to complete', type: 'boolean' }),
+    cmd()
+      .use(authenticateUserOrToken)
+      .use(requestSite)
+      .use(demandOption('site'))
+      .use(requestOption('deployment', async () => {
         if (isInteractive) {
-            // TODO: get the site's deployments
-            return await prompts.select({
+          // TODO: get the site's deployments
+          return await prompts.select({
             message: 'Select a deployment',
             choices: [
-                { name: chalk.bold('*added new posts [d55156]'), value: 'd55156', description: 'created today' },
-                { name: 'initial [304c19]', value: '304c19', description: 'updated 1 year ago' }
+              { name: chalk.bold('*added new posts [d55156]'), value: 'd55156', description: 'created today' },
+              { name: 'initial [304c19]', value: '304c19', description: 'updated 1 year ago' }
             ]
-            })
+          })
         }
-    }, '$SC_DEPLOY_ID')
-    .option('wait', { alias: 'w', describe: 'wait for the invalidation to complete', type: 'boolean' })
-    .demandOption('deployment'))
+      }))
+      .use(demandOption('deployment'))
+      .do(promote))
 
   // authenticate user or deploykey
   // if interactive, show a list of deployments else if specified else -n count else -n -1
   // .command('rollback')
+
+  // .command('destroy')
 
     .help('help')
     .command('help', false, (y) => y, (argv) => { cli.showHelp() })
@@ -237,7 +195,8 @@ module.exports = async function main () {
     .demandCommand(1, 1, 'command required')
     .strictCommands()
 
-  const argv = await yargs.parse()
+  cli.wrap(Math.min(cli.terminalWidth(), 120))
+  const argv = await cli.parse()
   console.log(argv)
 }
 
@@ -261,4 +220,9 @@ async function deploy ({ site }) {
   // deploy
   // if --promote also promote
   // if --wait also wait (if interactive wait by default)
+}
+
+async function promote (params) {
+  // authenticate user or deploykey
+  // siteId/deployId
 }
