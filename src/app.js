@@ -1,21 +1,17 @@
 const dns = require('node:dns/promises')
-const path = require('node:path')
 const { randomBytes } = require('node:crypto')
-const { createReadStream } = require('node:fs')
-const { glob, mkdtemp, stat } = require('node:fs/promises')
-const { tmpdir } = require('node:os')
-const { pipeline } = require('node:stream/promises')
 
-const mime = require('mime-types')
 const namor = require('namor')
-const tar = require('tar')
 
 const logger = require('./logger').getLogger()
 
 const cfront = require('./cfront')
 const db = require('./db')
+const git = require('./git')
 const r53 = require('./r53')
 const s3 = require('./s3')
+
+exports.createTarball = git.createTarball
 
 const delay = async (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
@@ -28,14 +24,6 @@ class DomainValidationFailedError extends Error {
   }
 }
 exports.DomainValidationFailedError = DomainValidationFailedError
-
-// where deployments are stored on S3
-const siteDeploymentsKeyPrefix = (siteId) => `deployments/${siteId}`
-const deploymentTarballKey = (siteId, deploymentId) =>
-  `${siteDeploymentsKeyPrefix(siteId)}/${deploymentId}.tar.gz`
-
-// where live site content is stored on S3
-const siteContentKeyPrefix = (siteId) => `sites/${siteId}/content`
 
 // generate a unique human-friendly id for each site to be used
 // as a subdomain.
@@ -58,17 +46,6 @@ const generateDeployId = () => {
   timestamp.writeBigInt64BE(BigInt(new Date().getTime()))
   const rand = randomBytes(4)
   return Buffer.concat([timestamp, rand]).toString('hex')
-}
-
-// create a stream of a .tar.gz of the directory at the provided path.
-// returns a node stream that can be piped to a file or request.
-exports.createTarball = async (directoryPath, exclude = []) => {
-  logger.info(`creating tarball of ${directoryPath}`)
-  const files = await Array.fromAsync(glob('**/*', { cwd: directoryPath, exclude }))
-  for (const item of files) {
-    logger.info(item)
-  }
-  return ReadableStream.from(tar.create({ cwd: directoryPath, gzip: true }, files))
 }
 
 exports.createUser = async ({ userId, name }) => {
@@ -169,12 +146,18 @@ exports.setSiteCustomDomain = async (siteId, customDomain) => {
 // NOTE: this does not update the content on the site.
 // For that, call promoteDeployment.
 exports.createDeployment = async ({ siteId, contentTarball }) => {
+  const site = await db.get('sites', { siteId })
   const deploymentId = generateDeployId()
-  await s3.upload(deploymentTarballKey(siteId, deploymentId), contentTarball)
+
+  const commitSha = await (site.currentDeployment
+    ? git.addDeployment({ siteId, deploymentId, tarball: contentTarball })
+    : git.initializeSite({ siteId, deploymentId, tarball: contentTarball }))
+
   logger.info(`create ${siteId}/${deploymentId}`)
   const deployment = await db.put('deployments', {
     deploymentId,
     siteId,
+    commitSha,
     createdAt: new Date().toISOString()
   })
   return deployment
@@ -201,44 +184,16 @@ exports.promoteDeployment = async ({ siteId, deploymentId }) => {
   const deployment = await db.show('deployments', { siteId, deploymentId })
 
   if (!site.tenantId) {
-    logger.warn(
-      'This is the first deployment published to the site, so it will take longer ' +
-      'than usual to go live. Future deployments should be much quicker.'
-    )
+    // logger.warn(
+    //   'This is the first deployment published to the site, so it will take longer ' +
+    //   'than usual to go live. Future deployments should be much quicker.'
+    // ) // TODO: move to cli
     logger.info('creating distro tenant')
     site.tenantId = await createDistribution(site)
     await db.put('sites', site)
   }
 
-  const siteContentPath = siteContentKeyPrefix(siteId)
-  logger.info(`promoting ${siteId}/${deploymentId}`)
-
-  // in order to unzip the tarball in place, we need to download it, extract it
-  // locally, and upload each file one at a time.
-  const tmpDir = await mkdtemp(path.join(tmpdir(), `${process.env.APP_ID}-`))
-  const tarballPath = deploymentTarballKey(siteId, deploymentId)
-  logger.info(`downloading ${tarballPath} to ${tmpDir}`)
-  const tarball = await s3.download(tarballPath)
-  const extract = tar.extract({ cwd: tmpDir, strict: true })
-  logger.info('extracting tarball')
-  await pipeline(tarball, extract) // wait for extraction to complete
-
-  logger.info(`deleting live site ${siteContentPath}`)
-  await s3.deleteRecursive(siteContentPath)
-
-  // upload the tarball
-  logger.info('uploading files')
-  for await (const entry of glob(path.join(tmpDir, '**', '*'))) {
-    const s = await stat(entry)
-    if (!s.isDirectory()) {
-      const key = path.join(siteContentPath, path.relative(tmpDir, entry))
-      // if we don't specify the content type, CF will send it as a binary file
-      // and the browser will simply download it
-      const contentType = mime.contentType(path.extname(entry))
-      logger.verbose(`upload ${contentType} ${entry} ${key}`)
-      await s3.upload(key, createReadStream(entry), { contentType })
-    }
-  }
+  await git.promoteDeployment(siteId, deploymentId)
 
   if (site.currentDeployment) {
     logger.info('invalidating cache')
@@ -272,8 +227,8 @@ exports.deleteSite = async (siteId) => {
       .then(logger.info(`[${siteId}] deleted subdomain route`)),
 
     // delete data from S3
-    s3.deleteRecursive(siteContentKeyPrefix(siteId)).then(() => logger.info(`[${siteId}] deleted site content`)),
-    s3.deleteRecursive(siteDeploymentsKeyPrefix(siteId)).then(() => logger.info(`[${siteId}] deleted deployment data`)),
+    s3.deleteRecursive(git.siteContentKeyPrefix(siteId)).then(() => logger.info(`[${siteId}] deleted site content`)),
+    s3.deleteRecursive(git.siteDeploymentsKeyPrefix(siteId)).then(() => logger.info(`[${siteId}] deleted deployment data`)),
     // delete all deployments from db
     deleteDeploymentsForSite(siteId).then(() => logger.info(`[${siteId}] deleted deployment history`)),
     // delete site from db

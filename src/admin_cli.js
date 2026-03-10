@@ -81,7 +81,7 @@ async function listDeployments ({ site }) {
 
 async function deploy ({ path, site, exclude, promote, wait }) {
   console.log('zipping and uploading...')
-  const contentTarball = await app.createTarball(path, exclude)
+  const contentTarball = await app.createTarball(path, { exclude })
   const deployment = await app.createDeployment({ siteId: site, contentTarball })
   console.log(deployment)
   if (promote) {

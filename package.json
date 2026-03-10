@@ -20,6 +20,7 @@
     "mime-types": "^3.0.2",
     "namor": "^3.0.3",
     "serverless-http": "^3.2.0",
+    "simple-git": "^3.32.3",
     "tar": "^7.5.10",
     "winston": "^3.19.0",
     "yargs": "^18.0.0"

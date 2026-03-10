@@ -41,7 +41,6 @@ curl -X POST \
 
 # TODO
 
-- store with git-remote-s3
 - breakup app
 - deploy keys
 - production deploy
