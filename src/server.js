@@ -5,6 +5,8 @@ const { configure: configureLogger, getLogger } = require('./logger')
 configureLogger({ level: 'verbose', pretty: false })
 const logger = getLogger()
 
+const auth = require('./auth')
+const { AuthorizationError } = auth
 const app = require('./app')
 
 const server = new Koa()
@@ -25,14 +27,23 @@ server.use(async (ctx, next) => {
   try {
     return await next()
   } catch (err) {
-    logger.error('unhandled server error', err)
     const errorData = {
       message: 'Server Error'
     }
     if (process.env.NODE_ENV === 'dev') {
-      errorData.message = err.message
+      errorData.details = err.message
+      errorData.stack = err.stack.split('\n')
     }
-    ctx.status = 500
+
+    if (err instanceof AuthorizationError) {
+      console.error('authorization error', err)
+      ctx.status = 401
+      errorData.message = `Authorization Failed: ${err.message}`
+    } else {
+      // other error
+      logger.error('unhandled server error', err)
+      ctx.status = 500
+    }
     ctx.body = {
       status: 'ERROR',
       error: errorData
@@ -47,8 +58,39 @@ router.get('/', async (ctx) => {
       app: process.env.APP_ID,
       env: process.env.NODE_ENV,
       distro: process.env.DISTRIBUTION_DOMAIN,
-      distro_id: process.env.DISTRIBUTION_ID,
-      connection_group_id: process.env.CONNECTION_GROUP_ID
+      distroId: process.env.DISTRIBUTION_ID,
+      connectionGroupId: process.env.CONNECTION_GROUP_ID
+    }
+  }
+})
+
+router.post('/signup', async (ctx) => {
+  const { authReqId, expiresAt, state, authorizationUrl } = await auth.initiateSignup()
+  ctx.body = {
+    status: 'OK',
+    data: { authReqId, expiresAt, state, authorizationUrl }
+  }
+})
+
+router.get('/signup/:authReqId', async (ctx) => {
+  const { authReqId, expiresAt, state, accessToken, authorizationUrl } = await auth.getSignupState(ctx.params.authReqId)
+  ctx.body = {
+    status: 'OK',
+    data: { authReqId, expiresAt, state, accessToken, authorizationUrl }
+  }
+})
+
+router.get('/oauth/github/callback', async (ctx) => {
+  try {
+    const { userId, username, createdAt } = await auth.handleAuthCallback(ctx.query.code, ctx.query.state)
+    logger.info('user registered', { userId, username, createdAt })
+    ctx.body = 'Authorization complete! You can now close this window.'
+  } catch (err) {
+    if (err instanceof AuthorizationError) {
+      ctx.status = 401
+      let body = 'Authorization failed. Please try again.'
+      if (process.env.NODE_ENV === 'dev') body += `\n\n${err.message}\n${err.stack}`
+      ctx.body = body
     }
   }
 })

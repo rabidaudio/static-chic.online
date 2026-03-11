@@ -26,18 +26,18 @@ module.exports.put = async (table, data) => {
   return data
 }
 
-module.exports.show = async (table, key) => {
+module.exports.get = async (table, keys) => {
   const command = new GetCommand({
     TableName: `${tablePrefix}-${table}`,
-    Key: key // e.g. { userId }
+    Key: keys // e.g. { userId }
   })
   try {
-    logger.http(`dynamo: get ${table} ${key}`)
+    logger.http(`dynamo: get ${table}`, keys)
     const { Item } = await docClient.send(command)
     return Item
   } catch (err) {
     if (err instanceof ResourceNotFoundException) {
-      logger.info(`get ${table} ${key}: not found`)
+      logger.info(`get ${table}: not found`, keys)
       return null
     }
     throw err

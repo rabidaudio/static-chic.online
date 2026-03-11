@@ -47,6 +47,7 @@ provider:
             - dynamodb:UpdateItem
             - dynamodb:DeleteItem
           Resource:
+            - Fn::GetAtt: [AuthRequestsTable, Arn]
             - Fn::GetAtt: [UsersTable, Arn]
             - Fn::GetAtt: [SitesTable, Arn]
             - Fn::GetAtt: [DeploymentsTable, Arn]
@@ -99,14 +100,28 @@ provider:
 
 functions:
   api:
-    image:
-      name: appimg
+    # NOTE: switching between docker and native handler causes the whole stack to turn over.
+    # perhaps we can delete just the function?
+    # image:
+    #   name: appimg
+    handler: handler.handler
     events:
       - httpApi: "*"
 
 resources:
   Resources:
     # DynamoDB Tables
+    AuthRequestsTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        AttributeDefinitions:
+          - AttributeName: authReqId
+            AttributeType: S
+        KeySchema:
+          - AttributeName: authReqId
+            KeyType: HASH
+        BillingMode: PAY_PER_REQUEST
+        TableName: ${param:tablePrefix}-auth-requests
     UsersTable:
       Type: AWS::DynamoDB::Table
       Properties:

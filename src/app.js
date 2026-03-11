@@ -48,17 +48,17 @@ const generateDeployId = () => {
   return Buffer.concat([timestamp, rand]).toString('hex')
 }
 
-module.exports.createUser = async ({ userId, name }) => {
-  return await db.put('users', {
-    userId,
-    name,
-    createdAt: new Date().toISOString()
-  })
-}
+// module.exports.createUser = async ({ userId, name }) => {
+//   return await db.put('users', {
+//     userId,
+//     name,
+//     createdAt: new Date().toISOString()
+//   })
+// }
 
-module.exports.getUser = async (userId) => {
-  return await db.show('users', { userId })
-}
+// module.exports.getUser = async (userId) => {
+//   return await db.get('users', { userId })
+// }
 
 module.exports.listSitesForUser = async (userId) => {
   const sites = await db.query('sites', { userId }, { idx: 'idxUserId', asc: false })
@@ -94,7 +94,7 @@ module.exports.createSite = async ({ name, userId, customDomain }) => {
 // }
 
 module.exports.getSite = async (siteId) => {
-  const site = await db.show('sites', { siteId })
+  const site = await db.get('sites', { siteId })
   return { ...site, deployKey: '<obfuscated>' }
 }
 
@@ -125,7 +125,7 @@ module.exports.verifyCustomDomain = async (siteId, customDomain) => {
 module.exports.setSiteCustomDomain = async (siteId, customDomain) => {
   if (customDomain) await this.verifyCustomDomain(siteId, customDomain)
 
-  const site = await db.show('sites', { siteId })
+  const site = await db.get('sites', { siteId })
 
   // if distro exists, update it
   if (site.tenantId) {
@@ -180,8 +180,8 @@ const createDistribution = async ({ siteId, customDomain }) => {
 
 // make the deployment live for the site
 module.exports.promoteDeployment = async ({ siteId, deploymentId }) => {
-  const site = await db.show('sites', { siteId })
-  const deployment = await db.show('deployments', { siteId, deploymentId })
+  const site = await db.get('sites', { siteId })
+  const deployment = await db.get('deployments', { siteId, deploymentId })
 
   if (!site.tenantId) {
     // logger.warn(
@@ -211,7 +211,7 @@ module.exports.promoteDeployment = async ({ siteId, deploymentId }) => {
 
 module.exports.deleteSite = async (siteId) => {
   logger.warn(`deleting site ${siteId}`)
-  const site = await db.get('sites', { siteId })
+  const { tenantId } = await db.get('sites', { siteId })
   const deleteDeploymentsForSite = async (siteId) => {
     for (const { deploymentId } in await db.query('deployments', { siteId })) {
       logger.info(`deleting ${siteId}/${deploymentId}`)
@@ -220,26 +220,28 @@ module.exports.deleteSite = async (siteId) => {
   }
   await Promise.all([
     // delete resources
-    (site.tenantId
-      ? cfront.deleteTenant(site.tenantId).then(logger.info(`[${siteId}] deleted distribution tenant`))
+    (tenantId
+      ? cfront.deleteTenant(tenantId).then(logger.info(`[${siteId}] deleted distribution tenant`))
       : Promise.resolve()
     ).then(() => r53.deleteSubdomain(siteId))
       .then(logger.info(`[${siteId}] deleted subdomain route`)),
 
     // delete data from S3
-    s3.deleteRecursive(git.siteContentKeyPrefix(siteId)).then(() => logger.info(`[${siteId}] deleted site content`)),
-    s3.deleteRecursive(git.siteDeploymentsKeyPrefix(siteId)).then(() => logger.info(`[${siteId}] deleted deployment data`)),
+    s3.deleteRecursive(git.getSiteContentKey(siteId)).then(() => logger.info(`[${siteId}] deleted site content`)),
+    s3.deleteRecursive(git.getSiteDeploymentsKey(siteId)).then(() => logger.info(`[${siteId}] deleted deployment data`)),
     // delete all deployments from db
-    deleteDeploymentsForSite(siteId).then(() => logger.info(`[${siteId}] deleted deployment history`)),
-    // delete site from db
-    db.delete('sites', { siteId }).then(() => logger.info(`[${siteId}] deleted site`))
+    deleteDeploymentsForSite(siteId)
+      .then(() => logger.info(`[${siteId}] deleted deployment history`))
+      // delete site from db
+      .then(() => db.delete('sites', { siteId }))
+      .then(() => logger.info(`[${siteId}] deleted site`))
   ])
   logger.info(`site deleted: ${siteId}`)
 }
 
 module.exports.awaitInvalidationComplete = async ({ siteId, deploymentId }) => {
-  const site = await db.show('sites', { siteId })
-  const deployment = await db.show('deployments', { siteId, deploymentId })
+  const site = await db.get('sites', { siteId })
+  const deployment = await db.get('deployments', { siteId, deploymentId })
   if (!deployment.invalidationId) {
     logger.info(`no invalidations for ${siteId}/${deploymentId}`)
     return
