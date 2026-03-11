@@ -47,11 +47,11 @@ module.exports.get = async (table, keys) => {
 // Return an efficient page of results by filtering to partitionKey and ordering
 // by sortKey descending.
 // TODO: support pagination
-module.exports.query = async (table, partition, { asc, idx } = {}) => {
+module.exports.query = async (table, partition, { asc, idx, limit } = {}) => {
   const [partitionKey, partitionValue] = Object.entries(partition)[0]
   const params = {
     TableName: `${tablePrefix}-${table}`,
-    Limit: 100,
+    Limit: limit || 100,
     ScanIndexForward: asc || false,
     ExpressionAttributeValues: {
       ':v1': partitionValue

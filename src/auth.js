@@ -1,7 +1,5 @@
 const { randomBytes } = require('node:crypto')
 
-const fetch = require('node-fetch')
-
 const logger = require('./logger').getLogger()
 
 const db = require('./db')
@@ -13,7 +11,7 @@ const AUTH_REQ_EXPIRE_TIME = 1000 * 60 * 15 // 15 minutes
 
 const getExpiryTime = (fromNow = AUTH_REQ_EXPIRE_TIME) => new Date(new Date().getTime() + fromNow).toISOString()
 
-const isExpired = (authReq) => new Date().getTime() >= new Date(authReq.expiresAt).getTime()
+const isExpired = (expiresAt) => new Date().getTime() >= new Date(expiresAt).getTime()
 
 const generateAuthReqId = () => randomBytes(32).toString('base64url')
 
@@ -48,8 +46,8 @@ module.exports.getSignupState = async (authReqId) => {
   const authReq = await db.get('auth-requests', { authReqId })
   if (!authReq) throw new AuthorizationError('Invalid auth request')
 
-  if (isExpired(authReq)) {
-    const { expiresAt } = isExpired(authReq)
+  if (isExpired(authReq.expiresAt)) {
+    const { expiresAt } = isExpired(authReq.expiresAt)
     logger.info(`auth request ${authReqId} state=expired expiresAt=${expiresAt}`)
     await db.put('auth-requests', { authReqId, state: 'expired', expiresAt })
     return { authReqId, state: 'expired', expiresAt }
@@ -68,16 +66,23 @@ module.exports.getSignupState = async (authReqId) => {
   return authReq
 }
 
-const getGithubAccessToken = async (code) => {
-  // https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/authorizing-oauth-apps#2-users-are-redirected-back-to-your-site-by-github
+// must pass either code or refresh token
+const getGithubAccessToken = async ({ code, refreshToken }) => {
+  // https:// docs.github.com/en/apps/oauth-apps/building-oauth-apps/authorizing-oauth-apps#2-users-are-redirected-back-to-your-site-by-github
   logger.http('github: POST https://github.com/login/oauth/access_token')
+  const reqBody = {
+    client_id: process.env.GITHUB_CLIENT_ID,
+    client_secret: process.env.GITHUB_CLIENT_SECRET
+  }
+  if (code) {
+    reqBody.code = code
+  } else if (refreshToken) {
+    reqBody.refresh_token = refreshToken
+    reqBody.grant_type = 'refresh_token'
+  }
   const res = await fetch('https://github.com/login/oauth/access_token', {
     method: 'POST',
-    body: JSON.stringify({
-      client_id: process.env.GITHUB_CLIENT_ID,
-      client_secret: process.env.GITHUB_CLIENT_SECRET,
-      code
-    }),
+    body: JSON.stringify(reqBody),
     headers: {
       'Content-Type': 'application/json',
       Accept: 'application/json'
@@ -97,6 +102,12 @@ const getGithubAccessToken = async (code) => {
 }
 
 const getGithubUser = async (accessToken) => {
+  // TODO: octokit seems to ruin node treating the app as cjs
+  // const { Octokit } = require("octokit") // await import
+  // const client = new Octokit({ auth: accessToken })
+  // const { data } = await client.rest.users.getAuthenticated()
+  // return data
+
   // https://docs.github.com/en/rest/users/users?apiVersion=2022-11-28
   logger.http('github: GET https://api.github.com/user')
   const res = await fetch('https://api.github.com/user', {
@@ -105,7 +116,10 @@ const getGithubUser = async (accessToken) => {
       Accept: 'application/vnd.github+json'
     }
   })
-  if (res.status !== 200) throw new Error(`Github: get user request failed: ${res.status}`)
+  if (res.status !== 200) {
+    logger.error('github: get user failed', res.body)
+    throw new Error(`Github: get user request failed: ${res.status}`)
+  }
   return await res.json()
 }
 
@@ -113,7 +127,7 @@ module.exports.handleAuthCallback = async (code, state) => {
   const authReqId = state
   let authReq = await db.get('auth-requests', { authReqId })
   if (!authReq) throw new AuthorizationError('Invalid authReqId')
-  if (isExpired(authReq)) throw new AuthorizationError('Auth request expired')
+  if (isExpired(authReq.expiresAt)) throw new AuthorizationError('Auth request expired')
   if (authReq.state !== 'pending') throw new AuthorizationError('Invalid authReq state')
 
   let accessInfo, githubUser
@@ -122,7 +136,6 @@ module.exports.handleAuthCallback = async (code, state) => {
     githubUser = await getGithubUser(accessInfo.accessToken)
   } catch (err) {
     await db.put('auth-requests', { ...authReq, state: 'failed' })
-    if (err instanceof AuthorizationError) throw err
     throw new AuthorizationError('Authorization of access code failed', { cause: err })
   }
   const { accessToken, accessTokenExpiresAt, refreshToken, refreshTokenExpiresAt } = accessInfo
@@ -140,7 +153,7 @@ module.exports.handleAuthCallback = async (code, state) => {
   })
   authReq = await db.put('auth-requests', {
     ...authReq,
-    accessToken,
+    userToken: `${userId}|${accessToken}`,
     state: 'authorized',
     userId,
     expiresAt: accessTokenExpiresAt
@@ -148,62 +161,43 @@ module.exports.handleAuthCallback = async (code, state) => {
   return user
 }
 
-/*
+module.exports.authorizeUser = async (bearerToken) => {
+  if (!bearerToken) throw new AuthorizationError('No token provided')
 
-1. save auth-request with securerandom authreq
-2. send user to below, passing authreq in state
+  const [userId, userToken] = bearerToken.replace(/^Bearer /, '').split('|', 2)
+  const user = await db.get('users', { userId })
+  if (!user) throw new AuthorizationError('User not found')
 
-https://github.com/login/oauth/authorize ?client_id=...&state=...
+  let githubUser
+  try {
+    githubUser = await getGithubUser(userToken)
+  } catch (err) {
+    const { refreshToken, refreshTokenExpiresAt } = user
+    if (refreshToken && !isExpired(refreshTokenExpiresAt)) {
+      // TODO: if a refresh token is available, try that
+      // https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/refreshing-user-access-tokens
+      // try {
+      //   const { accessToken, accessTokenExpiresAt, refreshToken, refreshTokenExpiresAt } = getGithubAccessToken({ refreshToken })
+      // } catch (err) {
+      //   throw new AuthorizationError('Authorization of access code failed', { cause: err })
+      // }
+    }
 
-3. app polls API with authreq waiting for auth
+    throw new AuthorizationError('Authorization of access code failed', { cause: err })
+  }
 
-when user authenticates, API is called:
+  const { name, email, login } = githubUser
+  return await db.put('users', {
+    ...user,
+    name,
+    email,
+    username: login
+    // refreshToken,
+    // refreshTokenExpiresAt,
+  })
+}
 
-https://api.dev.static-chic.online/oauth/github/callback ?code=... & state=...
-
-4. API finds existing authReq from state
-5. API gets access token
-
-POST https://github.com/login/oauth/access_token ?
-    "client_id" => CLIENT_ID,
-    "client_secret" => CLIENT_SECRET,
-    "code" => code
-    -> access_token expires_in refresh_token refresh_token_expires_in
-
-GET https://api.github.com/user
-    Authorization: Bearer access_token
-    -> user_info
-
-6. API upserts user record, saving access token to authreq and refresh token to user. points authreq to user
-7. When authreq is polled again, returns authreq+access_token and deletes
-8. client saves auth_token
-
-later for auth
-
-1. client makes api call with access token
-2. server checks if access token is valid. If so finds user by userId, continues
-3. else checks refresh token. If valid, sends new access token to client, continues
-4. else auth failed, need to re-auth
-
-------
-
-POST https://github.com/login/device/code
-    body: application/x-www-form-urlencoded CLIENT_ID
-        -> JSON verification_uri, user_code, device_code, and interval
-
-send user to verification_uri to input user_code
-
-Poll for access token:
-
-POST https://github.com/login/oauth/access_token
-    body: application/x-www-form-urlencoded CLIENT_ID, device_code, grant_type=urn:ietf:params:oauth:grant-type:device_code
-        -> JSON error,access_token
-
-save access token
-
-verify validity
-
-GET https://api.github.com/user
-    "Accept" => "application/vnd.github+json", "Authorization" => "Bearer #{token}"
-
-*/
+module.exports.authorizeDeployKey = async (deployKey) => {
+  // create index for deploykey
+  // return user,site,deploykey
+}

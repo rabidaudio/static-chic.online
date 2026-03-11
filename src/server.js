@@ -12,7 +12,9 @@ const app = require('./app')
 const server = new Koa()
 const router = new Router()
 
-// log
+server.use(require('@koa/bodyparser').bodyParser())
+
+// log requests
 server.use(async (ctx, next) => {
   const { method, url } = ctx
   logger.http(`${method} ${url}`)
@@ -51,6 +53,35 @@ server.use(async (ctx, next) => {
   }
 })
 
+// bearer token auth
+server.use(async (ctx, next) => {
+  const bearerToken = ctx.get('Authorization')
+  if (bearerToken) {
+    ctx.user = await auth.authorizeUser(bearerToken)
+    // TODO: if refreshToken used, return an updated bearerToken
+  }
+  return await next()
+})
+
+const requireUserAuthMiddleware = async (ctx, next) => {
+  if (!ctx.user) throw new AuthorizationError('Not authorized')
+  return await next()
+}
+
+const findSiteMiddleware = async (ctx, next) => {
+  const siteId = ctx.params.siteId
+  // make sure the user owns the site first
+  const userSites = await app.listSitesForUser(ctx.user.userId)
+  const site = userSites.find(s => s.siteId === siteId)
+  if (!site || site.userId !== ctx.user.userId) {
+    ctx.status = 403
+    ctx.body = { status: 'ERROR', error: { message: 'Forbidden' } }
+    return
+  }
+  ctx.site = site
+  return await next()
+}
+
 router.get('/', async (ctx) => {
   ctx.body = {
     status: 'OK',
@@ -59,7 +90,8 @@ router.get('/', async (ctx) => {
       env: process.env.NODE_ENV,
       distro: process.env.DISTRIBUTION_DOMAIN,
       distroId: process.env.DISTRIBUTION_ID,
-      connectionGroupId: process.env.CONNECTION_GROUP_ID
+      connectionGroupId: process.env.CONNECTION_GROUP_ID,
+      userId: ctx.user && ctx.user.userId
     }
   }
 })
@@ -95,44 +127,65 @@ router.get('/oauth/github/callback', async (ctx) => {
   }
 })
 
-router.get('/sites/:siteId/deployments', async (ctx) => {
-  const deployments = await app.listDeployments(ctx.params.siteId)
+router.post('/sites', requireUserAuthMiddleware, async (ctx) => {
+  const { userId } = ctx.user
+  const { name, customDomain } = ctx.request.body
+  const site = await app.createSite({ name, userId, customDomain })
+  ctx.body = { status: 'OK', data: site }
+})
+
+router.get('/sites', requireUserAuthMiddleware, async (ctx) => {
+  const { userId } = ctx.user
+  const sites = await app.listSitesForUser(userId)
+  // TODO: pagination
   ctx.body = {
     status: 'OK',
-    data: deployments,
-    pagination: { count: deployments.length }
+    data: sites,
+    pagination: { count: sites.length }
   }
 })
 
-router.post('/sites/:siteId/deployments', async (ctx) => {
-  // TODO: authentication
-  const siteId = ctx.params.siteId
-  const contentTarball = ReadableStream.from(ctx.req)
-  const deployment = await app.createDeployment({ siteId, contentTarball })
-  ctx.body = { status: 'OK', data: deployment }
+router.get('/sites/:siteId', requireUserAuthMiddleware, findSiteMiddleware, async (ctx) => {
+  ctx.body = { status: 'OK', data: ctx.site }
 })
 
-router.get('/sites/:siteId/deployments/:deploymentId', async (ctx) => {
-  const siteId = ctx.params.siteId
-  const deploymentId = ctx.params.deploymentId
-  const deployment = await app.getDeployment({ siteId, deploymentId })
-  ctx.body = { status: 'OK', data: deployment }
-})
-
-router.post('/sites/:siteId/deployments/:deploymentId/promote', async (ctx) => {
-  const siteId = ctx.params.siteId
-  const deploymentId = ctx.params.deploymentId
-  const site = await app.promoteDeployment({ siteId, deploymentId })
-  const { currentDeployment, deployedAt } = site
-  ctx.body = { status: 'OK', data: { siteId, currentDeployment, deployedAt } }
-})
-
-router.delete('/sites/:siteId', async (ctx) => {
-  const siteId = ctx.params.siteId
-
+router.delete('/sites/:siteId', requireUserAuthMiddleware, findSiteMiddleware, async (ctx) => {
+  const { siteId } = ctx.site
   await app.deleteSite(siteId)
   ctx.body = { status: 'OK', data: { siteId } }
 })
+
+// router.get('/sites/:siteId/deployments', requireUserAuthMiddleware, findSiteMiddleware, async (ctx) => {
+//   const deployments = await app.listDeployments(ctx.params.siteId)
+//   // TODO: pagination
+//   ctx.body = {
+//     status: 'OK',
+//     data: deployments,
+//     pagination: { count: deployments.length }
+//   }
+// })
+
+// router.post('/sites/:siteId/deployments', async (ctx) => {
+//   const siteId = ctx.params.siteId
+//   const contentTarball = ReadableStream.from(ctx.req)
+//   const deployment = await app.createDeployment({ siteId, contentTarball })
+//   ctx.body = { status: 'OK', data: deployment }
+// })
+
+// router.get('/sites/:siteId/deployments/:deploymentId', async (ctx) => {
+//   const siteId = ctx.params.siteId
+//   const deploymentId = ctx.params.deploymentId
+//   const deployment = await app.getDeployment({ siteId, deploymentId })
+//   ctx.body = { status: 'OK', data: deployment }
+// })
+
+// router.post('/sites/:siteId/deployments/:deploymentId/promote', async (ctx) => {
+//   const siteId = ctx.params.siteId
+//   const deploymentId = ctx.params.deploymentId
+//   const site = await app.promoteDeployment({ siteId, deploymentId })
+//   const { currentDeployment, deployedAt } = site
+//   ctx.body = { status: 'OK', data: { siteId, currentDeployment, deployedAt } }
+// })
 
 server.use(router.routes()).use(router.allowedMethods())
 

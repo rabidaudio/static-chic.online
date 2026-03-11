@@ -50,6 +50,10 @@ provider:
             - Fn::GetAtt: [AuthRequestsTable, Arn]
             - Fn::GetAtt: [UsersTable, Arn]
             - Fn::GetAtt: [SitesTable, Arn]
+            - Fn::Join:
+              - ''
+              - - Fn::GetAtt: [SitesTable, Arn]
+                - "/index/*"
             - Fn::GetAtt: [DeploymentsTable, Arn]
         - Effect: Allow
           Action:
@@ -83,6 +87,10 @@ provider:
             - cloudfront:GetInvalidationForDistributionTenant
             - cloudfront:UpdateDistributionTenant
           Resource: "*"
+        - Effect: Allow
+          Action:
+            - route53:ChangeResourceRecordSets
+          Resource: arn:aws:route53:::hostedzone/${param:hostedZoneId}
 
   environment:
     NODE_ENV: ${sls:stage}
@@ -102,9 +110,9 @@ functions:
   api:
     # NOTE: switching between docker and native handler causes the whole stack to turn over.
     # perhaps we can delete just the function?
-    # image:
-    #   name: appimg
-    handler: handler.handler
+    # handler: handler.handler
+    image:
+      name: appimg
     events:
       - httpApi: "*"
 

@@ -50,14 +50,13 @@ pipx install git-remote-s3
 - breakup app
 - deploy keys
 - production deploy
-- Github authentication
 - deploy CLI
 - frontend
 - add Tags to everything for cost tracking
 - flag for private-only in sls to disable github logins
 - json vs text outputs from cli
 - complete integration tests
-- 404 returns 403 Permission Denied instead
+- Cloudfront 404 from S3 returns 403 Permission Denied instead
 - cli option for using git-remote-s3 directly
 - regenerate deploy key command
 - add optional messages to deployments
