@@ -20,8 +20,27 @@ class DomainValidationFailedError extends Error {
   }
 }
 
+const serialize = async (site, opts = {}) => sanitize({ ...site, status: (await getStatus(site)) }, opts)
+
+// generate a unique human-friendly id for each site to be used
+// as a subdomain.
+const generateSiteId = () => {
+  // space size: 7948^2*(26+10)^5 = 3.8 quadrillion
+  // ~50% chance of collision in sqrt() -> ~62 million
+  const name = namor.generate({ words: 2, salt: 5 })
+  if (!namor.valid_subdomain(name, { reserved: true })) { return generateSiteId() } // try again
+  return name
+}
+
+const getSiteDomain = (siteId) => `${siteId}.${process.env.SITES_DOMAIN}`
+
 module.exports = {
   DomainValidationFailedError,
+
+  getUserSite: async (userId, siteId) => {
+    const userSites = await db.query('sites', { userId }, { idx: 'idxUserId', asc: false, limit: 100 })
+    return userSites.find(s => s.siteId === siteId)
+  },
 
   list: async (userId) => {
     // TODO: pagination
@@ -37,13 +56,14 @@ module.exports = {
   // a userId which owns it.
   create: async ({ name, userId, customDomain }) => {
     const siteId = generateSiteId()
+    const siteDomain = getSiteDomain(siteId)
     logger.info(`generating ${siteId}`)
 
     if (customDomain) {
       await this.verifyCustomDomain(siteId, customDomain)
     }
 
-    await r53.createSubdomain(siteId)
+    await r53.createSubdomain(siteDomain)
     const site = await db.put('sites', {
       siteId,
       userId,
@@ -108,18 +128,18 @@ module.exports = {
   },
 
   prepareDistribution: async (site) => {
-    if (site.tenantId) return await serialize(site)
+    if (site.tenantId) return site
 
     logger.info('creating distro tenant')
     const { siteId, customDomain } = site
     const baseDomain = getSiteDomain(siteId)
     const { tenant, etag } = await cfront.createTenant({ siteId, customDomain, baseDomain })
     logger.verbose('tenant distro created', tenant)
-    site = await db.put('sites', { ...site, tenantId: tenant.Id, etag })
+    return await db.put('sites', { ...site, tenantId: tenant.Id, etag })
   },
 
   trackDeployment: async (site, deployment) => {
-    site = await db.put('sites', {
+    return await db.put('sites', {
       ...site,
       currentDeployment: deployment.deploymentId,
       deployedAt: new Date().toISOString()
@@ -148,7 +168,7 @@ module.exports = {
       (tenantId
         ? cfront.deleteTenant({ tenantId, etag }).then(logger.info(`[${siteId}] deleted distribution tenant`))
         : Promise.resolve()
-      ).then(() => r53.deleteSubdomain(siteId))
+      ).then(() => r53.deleteSubdomain(getSiteDomain(siteId)))
         .then(logger.info(`[${siteId}] deleted subdomain route`)),
 
       // delete data from S3
@@ -200,25 +220,15 @@ const getStatus = async (site) => {
     const deployment = await db.get('deployments', { siteId, deploymentId: currentDeployment })
     if (deployment.invalidationId) {
       const invalidation = await cfront.getInvalidation(tenantId, deployment.invalidationId)
-      status = invalidation.Status.toLowerCase()
+      if (invalidation.Status) {
+        status = invalidation.Status.toLowerCase()
+      }
     } else {
       const distro = await cfront.getTenant(tenantId)
-      status = distro.Status.toLowerCase() // InProgress, Complete, ??
+      if (distro.Status) {
+        status = distro.Status.toLowerCase() // InProgress, Complete, ??
+      }
     }
   }
   return status
 }
-
-const serialize = async (site, opts = {}) => sanitize({ ...site, status: (await getStatus(site)) }, opts)
-
-// generate a unique human-friendly id for each site to be used
-// as a subdomain.
-const generateSiteId = () => {
-  // space size: 7948^2*(26+10)^5 = 3.8 quadrillion
-  // ~50% chance of collision in sqrt() -> ~62 million
-  const name = namor.generate({ words: 2, salt: 5 })
-  if (!namor.valid_subdomain(name, { reserved: true })) { return generateSiteId() } // try again
-  return name
-}
-
-const getSiteDomain = (siteId) => `${siteId}.${process.env.SITES_DOMAIN}`

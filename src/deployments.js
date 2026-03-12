@@ -18,15 +18,15 @@ const generateDeploymentId = () => {
   return 'd_' + Buffer.concat([timestamp, rand]).toString('hex')
 }
 
-module.exports = {
-  sanitize: (deployment) => {
-    const {
-      deploymentId, siteId, createdAt
-      // exclude: commitSha, invalidationId,
-    } = deployment
-    return { deploymentId, siteId, createdAt }
-  },
+const sanitize = (deployment) => {
+  const {
+    deploymentId, siteId, createdAt
+    // exclude: commitSha, invalidationId,
+  } = deployment
+  return { deploymentId, siteId, createdAt }
+}
 
+module.exports = {
   // create a new deployment for a site.
   // Creates a new record in the deployments table, and adds the tarball
   // to the S3 bucket. DeploymentIds are generated so that they are sequential;
@@ -53,30 +53,30 @@ module.exports = {
       commitSha,
       createdAt
     })
-    return this.sanitize(deployment)
+    return sanitize(deployment)
   },
 
   list: async (siteId) => {
     // TODO: pagination?
     const deployments = await db.query('deployments', { siteId }, { asc: false, limit: 100 })
-    return deployments.map(d => this.sanitize(d))
+    return deployments.map(d => sanitize(d))
   },
 
   get: async ({ site, deploymentId }) => {
     const { siteId } = site
     const deployment = await db.get('deployments', { siteId, deploymentId })
-    return this.sanitize(deployment)
+    return sanitize(deployment)
   },
   // make the deployment live for the site
   promote: async ({ site, deploymentId }) => {
     const { siteId } = site
-    let deployment = await this.get({ site, deploymentId })
+    let deployment = await db.get('deployments', { siteId, deploymentId })
     if (site.currentDeployment === deploymentId) {
     // already deployed, just check the status and return
-      return this.sanitize(deployment)
+      return { site, deployment: sanitize(deployment) }
     }
 
-    await Sites.prepareDistribution(site)
+    site = await Sites.prepareDistribution(site)
     await Files.promote({ siteId, deploymentId })
 
     if (site.currentDeployment) {
@@ -86,7 +86,7 @@ module.exports = {
     }
 
     logger.info('updating site')
-    await Sites.trackDeployment(site, deployment)
-    return { site, deployment }
+    site = await Sites.trackDeployment(site, deployment)
+    return { site, deployment: sanitize(deployment) }
   }
 }

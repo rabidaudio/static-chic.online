@@ -21,11 +21,11 @@ app.use(require('@koa/bodyparser').bodyParser())
 // log requests
 app.use(async (ctx, next) => {
   const { method, url } = ctx
-  logger.http(`${method} ${url}`)
+  logger.http(`______ ${method} ${url}`)
   const start = Date.now()
   await next()
   const ms = Date.now() - start
-  logger.http(`${method} ${url} ${ctx.status} [${ms}ms]`)
+  logger.http(`|____ ${ctx.status} [${ms}ms] ${method} ${url}`)
 })
 
 // server errors
@@ -71,7 +71,7 @@ app.use(async (ctx, next) => {
 app.use(async (ctx, next) => {
   const authToken = ctx.get('Authorization')
   if (DeployKeys.isBearerToken(authToken)) {
-    ctx.site = await DeployKeys.authorizeDeployKey(authToken)
+    ctx.site = await DeployKeys.authorize(authToken)
   }
   return await next()
 })
@@ -89,16 +89,13 @@ const requireUserAuthOrDeployKey = async (ctx, next) => {
 const findSite = async (ctx, next) => {
   if (ctx.site) return await next() // already found from deploy key
 
-  const siteId = ctx.params.siteId
   // make sure the user owns the site first
-  const userSites = await Sites.list(ctx.user.userId)
-  const site = userSites.find(s => s.siteId === siteId)
-  if (!site || site.userId !== ctx.user.userId) {
+  ctx.site = await Sites.getUserSite(ctx.user.userId, ctx.params.siteId)
+  if (!ctx.site || ctx.site.userId !== ctx.user.userId) {
     ctx.status = 403
     ctx.body = { status: 'ERROR', error: { message: 'Forbidden' } }
     return
   }
-  ctx.site = site
   return await next()
 }
 
@@ -270,14 +267,13 @@ router.get('/sites/:siteId/deployments/:deploymentId', requireUserAuthOrDeployKe
 })
 
 router.post('/sites/:siteId/deployments/:deploymentId/promote', requireUserAuthOrDeployKey, findSite, async (ctx) => {
-  let site = ctx.site
   const deploymentId = ctx.params.deploymentId
-  if (site.currentDeployment === deploymentId) {
+  if (ctx.site.currentDeployment === deploymentId) {
     ctx.status = 202 // indicate that site is already live, nothing will happen
   }
-  const promotion = await Deployments.promote({ site, deploymentId })
-  site = promotion.site
-  const { siteId, deployedAt, status, deployment } = site
+  const promotion = await Deployments.promote({ site: ctx.site, deploymentId })
+  ctx.site = promotion.site
+  const { siteId, deployedAt, status, deployment } = ctx.site
   ctx.body = {
     status: 'OK',
     data: {

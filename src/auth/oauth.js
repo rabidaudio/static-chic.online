@@ -2,21 +2,33 @@ const { randomBytes } = require('node:crypto')
 
 const logger = require('../logger').getLogger()
 
-const { AuthorizationError, getExpiryTime, isExpired } = require('./auth_utils')
-const { findProviderByName } = require('./auth_providers')
+const { AuthorizationError, getExpiryTime, isExpired } = require('./utils')
+const { findProviderByName } = require('./providers')
 
 const db = require('../db')
 
 const AUTH_REQ_EXPIRE_TIME = 1000 * 60 * 15 // 15 minutes
 
-const OAuth = {
-  generateId: () => randomBytes(32).toString('base64url'),
+const generateId = () => randomBytes(32).toString('base64url')
 
+const generateUserToken = (userId, accessToken) => Buffer.from([userId, accessToken].join(':')).toString('base64')
+
+const parseUserToken = (authorizationHeader) => {
+  try {
+    const [userId, accessToken] = Buffer.from(authorizationHeader.replace(/^Basic /, ''), 'base64').toString('utf8').split(':')
+    const [providerName] = userId.split('_', 1)
+    return { userId, accessToken, providerName }
+  } catch (err) {
+    throw new AuthorizationError('Invalid basic auth', { cause: err })
+  }
+}
+
+const OAuth = {
   // create a new signup. Returns an authReqId which should be passed
   // to OAuth flow and used to poll the status
   initiateSignup: async (providerName) => {
     const provider = findProviderByName(providerName)
-    const authReqId = this.generateId()
+    const authReqId = generateId()
 
     return await db.put('auth-requests', {
       authReqId,
@@ -48,7 +60,7 @@ const OAuth = {
       logger.info(`auth request ${authReqId} state=authorized userId=${authReq.userId}`)
       await db.delete('auth-requests', { authReqId })
       const { accessToken, ...rest } = authReq
-      const userToken = this.generateUserToken(authReq.userId, accessToken)
+      const userToken = generateUserToken(authReq.userId, accessToken)
       return { ...rest, userToken }
     }
     if (authReq.state === 'pending') {
@@ -61,7 +73,7 @@ const OAuth = {
 
   handleCallback: async (providerName, ctx) => {
     const provider = findProviderByName(providerName)
-    const authReqId = provider.findAuthRequestId(ctx)
+    const authReqId = provider.findAuthReqId(ctx)
     let authReq = await db.get('auth-requests', { authReqId })
     if (!authReq) throw new AuthorizationError('Invalid authReqId')
     if (isExpired(authReq.expiresAt)) throw new AuthorizationError('Auth request expired')
@@ -91,22 +103,12 @@ const OAuth = {
     return user
   },
 
-  generateUserToken: (userId, accessToken) => Buffer.from([userId, accessToken].join(':')).toString('base64'),
-
   isBasicToken: (authorizationHeader) => authorizationHeader && authorizationHeader.match(/^Basic /),
 
-  parseUserToken: (authorizationHeader) => {
-    try {
-      const [userId, accessToken] = Buffer.from(authorizationHeader.replace(/^Basic /, ''), 'base64').toString('utf8').split(':')
-      const [providerName] = userId.split('_', 1)
-      return { userId, accessToken, providerName }
-    } catch (err) {
-      throw new AuthorizationError('Invalid basic auth', { cause: err })
-    }
-  },
+  parseUserToken,
 
   authorize: async (authorizationHeader) => {
-    const { userId, accessToken, providerName } = this.parseUserAuth(authorizationHeader)
+    const { userId, accessToken, providerName } = parseUserToken(authorizationHeader)
     const provider = findProviderByName(providerName)
 
     const user = await db.get('users', { userId })

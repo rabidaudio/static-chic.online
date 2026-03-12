@@ -13,17 +13,17 @@ module.exports = class GithubAuthProvider {
     return url.toString()
   }
 
-  async findAuthReqId (ctx) {
-    return ctx.body.state
+  findAuthReqId (ctx) {
+    return ctx.query.state
   }
 
   async handleCallback (ctx) {
-    const code = ctx.body.code
+    const code = ctx.query.code
     const accessInfo = await this.#getAccessToken({ code })
     const githubUser = await this.#getUser(accessInfo.accessToken)
 
-    const { id, accessToken, accessTokenExpiresAt, refreshToken, refreshTokenExpiresAt } = accessInfo
-    const { name, email, login } = githubUser
+    const { accessToken, accessTokenExpiresAt, refreshToken, refreshTokenExpiresAt } = accessInfo
+    const { id, name, email, login } = githubUser
     logger.info(`github: user authorized userId=${id} username=${login}`)
 
     return {

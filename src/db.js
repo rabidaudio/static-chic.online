@@ -21,7 +21,7 @@ module.exports.put = async (table, data) => {
     TableName: `${tablePrefix}-${table}`,
     Item: data
   })
-  logger.http(`put ${table}`)
+  logger.http(`dynamo: put ${table}`)
   await docClient.send(command)
   return data
 }

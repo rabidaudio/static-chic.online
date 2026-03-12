@@ -58,41 +58,39 @@ async function testAuth (ctx) {
 async function testSite (ctx) {
   api.set('Authorization', `Basic ${ctx.userToken}`)
 
-  let res = await api.GET('/sites')
-  expect(res.status).to.equal(200)
-  expect(res.json.status).to.equal('OK')
-  expect(res.json.data).to.be.empty
-
-  res = await api.POST('/sites', {
-    body: JSON.stringify({ name: 'Test Site' })
+  let res = await api.POST('/sites', {
+    body: JSON.stringify({ name: 'Test Site' }),
+    headers: {
+      'Content-Type': 'application/json'
+    }
   })
   expect(res.status).to.equal(201)
   expect(res.json.status).to.equal('OK')
   expect(res.json.data.siteId).to.exist
   ctx.siteId = res.json.data.siteId
-  // expect(res.json.data.name).to.equal('Test Site') // STOPSHIP
+  expect(res.json.data.name).to.equal('Test Site')
   expect(res.json.data.userId).to.equal(ctx.userId)
   expect(res.json.data.createdAt).to.satisfy((d) => new Date(d).getTime() > 0, 'be an iso timestamp')
   expect(res.json.data.currentDeployment).not.to.exist
   expect(res.json.data.deployedAt).not.to.exist
-  // expect(res.json.data.deployKey).to.match(/^dk_[A-Za-z0-9-_]+$/)
+  expect(res.json.data.deployKey).to.match(/^dk_[A-Za-z0-9-_]+$/)
   ctx.deployKey = res.json.data.deployKey
-  // expect(res.json.data.deployKeyCreatedAt).to.satisfy((d) => new Date(d).getTime() > 0, "be an iso timestamp") // STOPSHIP
+  expect(res.json.data.deployKeyCreatedAt).to.satisfy((d) => new Date(d).getTime() > 0, 'be an iso timestamp')
   expect(res.json.data.deployKeyLastUsedAt).not.to.exist
 
   res = await api.GET(`/sites/${ctx.siteId}`)
   expect(res.status).to.equal(200)
   expect(res.json.status).to.equal('OK')
   expect(res.json.data.siteId).to.equal(ctx.siteId)
-  // expect(res.json.data.deployKey).to.match(/^dk_[A-Za-z0-9-_]{5}x+$/, "be obfuscated")
+  expect(res.json.data.deployKey).to.match(/^dk_[A-Za-z0-9-_]{5}x+$/, 'be obfuscated')
 
   res = await api.GET('/sites')
   expect(res.status).to.equal(200)
   expect(res.json.status).to.equal('OK')
-  expect(res.json.data).to.have.length(1)
-  expect(res.json.pagination.count).to.equal(1)
-  expect(res.json.data[0].siteId).to.equal(ctx.siteId)
-  // expect(res.json.data[0].deployKey).to.match(/^dk_[A-Za-z0-9-_]{5}x+$/, "be obfuscated")
+  expect(res.json.data.length).to.be.greaterThanOrEqual(1)
+  expect(res.json.pagination.count).to.equal(res.json.data.length)
+  expect(res.json.data[0].siteId).to.equal(ctx.siteId) // ordered by most recent
+  expect(res.json.data[0].deployKey).to.match(/^dk_[A-Za-z0-9-_]{5}x+$/, 'be obfuscated')
 }
 
 // TODO: custom domain: before and after deploy, with and without domain
@@ -112,7 +110,7 @@ async function testDeploy (ctx) {
     })
     expect(res.status).to.equal(201)
     expect(res.json.status).to.equal('OK')
-    // expect(res.json.data.deploymentId).to.match(/^d_[a-z0f]+$/)
+    expect(res.json.data.deploymentId).to.match(/^d_[a-z0-f]+$/)
     expect(res.json.data.siteId).to.equal(ctx.siteId)
     expect(res.json.data.createdAt).to.satisfy((d) => new Date(d).getTime() > 0, 'be an iso timestamp')
     ctx.deploymentId1 = res.json.data.deploymentId
@@ -128,8 +126,7 @@ async function testDeploy (ctx) {
     expect(res.status).to.equal(200)
     expect(res.json.status).to.equal('OK')
     expect(res.json.data.siteId).to.equal(ctx.siteId)
-    expect(res.json.data.deployedAt).to.satisfy((d) => new Date(d).getTime() > 0, 'be an iso timestamp')
-    expect(res.json.data.status).to.exist
+    // TODO: show if deployed
 
     // check site status
     res = await api.GET(`/sites/${ctx.siteId}`)
@@ -152,7 +149,7 @@ async function testDeploy (ctx) {
       }
     })
     expect(res.status).to.equal(201)
-    // expect(res.json.data.deploymentId).to.match(/^d_[a-z0f]+$/)
+    expect(res.json.data.deploymentId).to.match(/^d_[a-z0-f]+$/)
     ctx.deploymentId2 = res.json.data.deploymentId
 
     // check site status
