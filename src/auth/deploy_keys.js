@@ -24,6 +24,7 @@ const parseDeployKey = (authorizationHeader) => {
 }
 
 const DeployKeys = {
+  generateDeployKey,
   obfuscateDeployKey,
   isBearerToken,
 

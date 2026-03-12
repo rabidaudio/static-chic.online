@@ -35,7 +35,8 @@ async function testAuth (ctx) {
 
   if (!res.wasCached) {
     console.log(chalk.bold('open ') + res.json.data.authorizationUrl)
-    await prompts.confirm({ message: 'authorized?' })
+    const authorized = await prompts.confirm({ message: 'authorized?' })
+    expect(authorized).to.be.true
   }
 
   res = await api.GET(`/signup/${ctx.authReqId}`)
@@ -113,6 +114,7 @@ async function testDeploy (ctx) {
     expect(res.json.data.deploymentId).to.match(/^d_[a-z0-f]+$/)
     expect(res.json.data.siteId).to.equal(ctx.siteId)
     expect(res.json.data.createdAt).to.satisfy((d) => new Date(d).getTime() > 0, 'be an iso timestamp')
+    expect(res.json.data.message).not.to.exist
     ctx.deploymentId1 = res.json.data.deploymentId
 
     // check dep 1
@@ -142,7 +144,7 @@ async function testDeploy (ctx) {
 
     // create dep 2
     const tarball2 = await createTarball(path.join(__dirname, '..', 'example-dist'), { exclude: ['*.txt'] })
-    res = await api.POST(`/sites/${ctx.siteId}/deployments`, {
+    res = await api.POST(`/sites/${ctx.siteId}/deployments?message=testmessage`, {
       body: (await buffer(tarball2)),
       headers: {
         'Content-Type': 'application/gzip'
@@ -150,6 +152,7 @@ async function testDeploy (ctx) {
     })
     expect(res.status).to.equal(201)
     expect(res.json.data.deploymentId).to.match(/^d_[a-z0-f]+$/)
+    expect(res.json.data.message).to.equal('testmessage')
     ctx.deploymentId2 = res.json.data.deploymentId
 
     // check site status
@@ -164,7 +167,8 @@ async function testDeploy (ctx) {
 
     if (!res.wasCached) {
       console.log(api.host.replace('api.', `${ctx.siteId}.sites.`))
-      await prompts.confirm({ message: 'deployed?' })
+      const deployed = await prompts.confirm({ message: 'deployed?' })
+      expect(deployed).to.be.true
     }
 
     // check site status
@@ -184,7 +188,8 @@ async function testDeploy (ctx) {
 
     if (!res.wasCached) {
       console.log(api.host.replace('api.', `${ctx.siteId}.sites.`))
-      await prompts.confirm({ message: 'deployed?' })
+      const deployed = await prompts.confirm({ message: 'deployed?' })
+      expect(deployed).to.be.true
     }
 
     // check site status
@@ -194,24 +199,24 @@ async function testDeploy (ctx) {
   }
 }
 
-// async function testUnauthorized(ctx) {
-//   api.clear('Authorization')
+async function testUnauthorized (ctx) {
+  api.clear('Authorization')
 
-//   const tests = async function* () {
-//     yield api.GET(`/sites`)
-//     yield api.POST('/sites')
-//     yield api.GET(`/sites/${ctx.siteId}`)
-//     yield api.PUT(`/sites/${ctx.siteId}`)
-//     yield api.POST(`/sites/${ctx.siteId}/deployKey/regenerate`)
-//     yield api.DELETE(`/sites/${ctx.siteId}`)
-//   }
+  const tests = async function * () {
+    yield await api.GET('/sites')
+    yield await api.POST('/sites')
+    yield await api.GET(`/sites/${ctx.siteId}`)
+    yield await api.PUT(`/sites/${ctx.siteId}`)
+    yield await api.POST(`/sites/${ctx.siteId}/deployKey/regenerate`)
+    yield await api.DELETE(`/sites/${ctx.siteId}`)
+  }
 
-//   for await (const res of tests) {
-//     expect(res.status).to.equal(401)
-//     expect(res.json.status).to.equal('ERROR')
-//     expect(res.json.error.message).to.match(/Authorization Failed/)
-//   }
-// }
+  for await (const res of tests) {
+    expect(res.status).to.equal(401)
+    expect(res.json.status).to.equal('ERROR')
+    expect(res.json.error.message).to.match(/Authorization Failed/)
+  }
+}
 
 // async function testDeployKey (ctx) {
 // revoke
@@ -225,4 +230,4 @@ async function testDeploy (ctx) {
 //   // test get after
 // }
 
-runTests(testRunning, testAuth, testSite, testDeploy)
+runTests(testRunning, testAuth, testSite, testDeploy, testUnauthorized)

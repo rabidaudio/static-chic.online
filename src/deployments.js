@@ -20,10 +20,10 @@ const generateDeploymentId = () => {
 
 const sanitize = (deployment) => {
   const {
-    deploymentId, siteId, createdAt
+    deploymentId, siteId, message, createdAt
     // exclude: commitSha, invalidationId,
   } = deployment
-  return { deploymentId, siteId, createdAt }
+  return { deploymentId, siteId, message, createdAt }
 }
 
 module.exports = {
@@ -33,7 +33,7 @@ module.exports = {
   // newer deployments are alphabetically after older ones.
   // NOTE: this does not update the content on the site.
   // For that, call promoteDeployment.
-  create: async ({ site, contentTarball }) => {
+  create: async ({ site, contentTarball, message }) => {
     const { siteId } = site
     const deploymentId = generateDeploymentId()
 
@@ -50,6 +50,7 @@ module.exports = {
     const deployment = await db.put('deployments', {
       deploymentId,
       siteId,
+      message,
       commitSha,
       createdAt
     })

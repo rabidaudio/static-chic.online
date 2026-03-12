@@ -47,19 +47,15 @@ pipx install git-remote-s3
 
 # TODO
 
-- deploy keys
-  - regenerate deploy key command
-  - show current deployment
-- deploy functions
-  - add optional messages to deployments
-  - use git-short-sha algorithm to show short deployment ids
+
 - finish CLI
 - cleanup
-  - breakup app
-  - complete integration tests
   - json vs text outputs from cli
   - Cloudfront 404 from S3 returns 403 Permission Denied instead
   - add Tags to everything for cost tracking
+  - fix timeouts
+    - create deploy sets up a temporary auth to write to s3, returns a url to post to
+    - a separate background job detects new files and unzips them, then updates deployment
 - production deploy
   - callback url
   - cli env var configuration: https://github.com/settings/apps/static-chic-online
