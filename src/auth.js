@@ -5,7 +5,6 @@ const logger = require('./logger').getLogger()
 const db = require('./db')
 
 class AuthorizationError extends Error {}
-module.exports.AuthorizationError = AuthorizationError
 
 const AUTH_REQ_EXPIRE_TIME = 1000 * 60 * 15 // 15 minutes
 
@@ -15,10 +14,45 @@ const isExpired = (expiresAt) => new Date().getTime() >= new Date(expiresAt).get
 
 const generateAuthReqId = () => randomBytes(32).toString('base64url')
 
+const generateUserToken = (userId, accessToken) => Buffer.from([userId, accessToken].join(':')).toString('base64')
+
+// generate a secure random key to grant access to deployments
+const generateDeployKey = () => ({
+  deployKey: `depkey_${randomBytes(32).toString('base64')}`,
+  deployCreatedAt: new Date().toISOString(),
+  deployKeyLastUsedAt: null
+})
+
+const obfuscateDeployKey = (deployKey) => deployKey.substr(0, 12) + deployKey.substr(12).replace(/./g, 'x')
+
+const isBasicToken = (authorizationHeader) => authorizationHeader && authorizationHeader.match(/^Basic /)
+
+const parseUserAuth = (authorizationHeader) => {
+  try {
+    const [userId, accessToken] = Buffer.from(authorizationHeader.replace(/^Basic /, ''), 'base64').toString('utf8').split(':')
+    return { userId, accessToken }
+  } catch (err) {
+    throw new AuthorizationError('Invalid basic auth', { cause: err })
+  }
+}
+
+const isBearerToken = (authorizationHeader) => authorizationHeader && authorizationHeader.match(/^Bearer /)
+
+const parseDeployKey = (authorizationHeader) => {
+  const deployKey = authorizationHeader.replace(/^Bearer /, '')
+  if (!deployKey.match(/^depkey_/)) throw new AuthorizationError('Invalid deploy key')
+  return deployKey
+}
+
+module.exports = { AuthorizationError, generateDeployKey, obfuscateDeployKey, parseUserAuth, parseDeployKey, isBasicToken, isBearerToken }
+
 const getGithubAuthorizationUrl = (authReqId) => {
   const url = new URL('https://github.com/login/oauth/authorize')
   url.searchParams.append('client_id', process.env.GITHUB_CLIENT_ID)
   url.searchParams.append('state', authReqId)
+  if (process.env.NODE_ENV !== 'prod') {
+    url.searchParams.append('redirect_uri', `${process.env.HOST}/oauth/github/callback`)
+  }
   return url.toString()
 }
 
@@ -32,7 +66,7 @@ module.exports.initiateSignup = async () => {
     expiresAt: getExpiryTime(),
     state: 'pending'
   })
-  return { authReq, authorizationUrl: getGithubAuthorizationUrl(authReqId) }
+  return { ...authReq, authorizationUrl: getGithubAuthorizationUrl(authReqId) }
 }
 
 // check if the OAuth flow is complete.
@@ -56,11 +90,13 @@ module.exports.getSignupState = async (authReqId) => {
   if (authReq.state === 'authorized') {
     logger.info(`auth request ${authReqId} state=authorized userId=${authReq.userId}`)
     await db.delete('auth-requests', { authReqId })
-    return authReq
+    const { accessToken, ...rest } = authReq
+    const userToken = generateUserToken(authReq.userId, accessToken)
+    return { ...rest, userToken }
   }
   if (authReq.state === 'pending') {
     logger.info(`auth request ${authReqId} state=pending expiresAt=${authReq.expiresAt}`)
-    return { authReq, authorizationUrl: getGithubAuthorizationUrl(authReqId) }
+    return { ...authReq, authorizationUrl: getGithubAuthorizationUrl(authReqId) }
   }
   logger.info(`auth request ${authReqId} state=${authReq.state}`)
   return authReq
@@ -132,15 +168,16 @@ module.exports.handleAuthCallback = async (code, state) => {
 
   let accessInfo, githubUser
   try {
-    accessInfo = await getGithubAccessToken(code)
+    accessInfo = await getGithubAccessToken({ code })
     githubUser = await getGithubUser(accessInfo.accessToken)
   } catch (err) {
+    logger.error('access token authorization error', err)
     await db.put('auth-requests', { ...authReq, state: 'failed' })
     throw new AuthorizationError('Authorization of access code failed', { cause: err })
   }
   const { accessToken, accessTokenExpiresAt, refreshToken, refreshTokenExpiresAt } = accessInfo
   const { name, email, login } = githubUser
-  const userId = `github:${githubUser.id}`
+  const userId = `github_${githubUser.id}`
   logger.info(`github: ${authReqId} user authorized userId=${userId} username=${login}`)
   const user = await db.put('users', {
     userId,
@@ -153,7 +190,7 @@ module.exports.handleAuthCallback = async (code, state) => {
   })
   authReq = await db.put('auth-requests', {
     ...authReq,
-    userToken: `${userId}|${accessToken}`,
+    accessToken,
     state: 'authorized',
     userId,
     expiresAt: accessTokenExpiresAt
@@ -161,16 +198,15 @@ module.exports.handleAuthCallback = async (code, state) => {
   return user
 }
 
-module.exports.authorizeUser = async (bearerToken) => {
-  if (!bearerToken) throw new AuthorizationError('No token provided')
+module.exports.authorizeUser = async (authorizationHeader) => {
+  const { userId, accessToken } = parseUserAuth(authorizationHeader)
 
-  const [userId, userToken] = bearerToken.replace(/^Bearer /, '').split('|', 2)
   const user = await db.get('users', { userId })
   if (!user) throw new AuthorizationError('User not found')
 
   let githubUser
   try {
-    githubUser = await getGithubUser(userToken)
+    githubUser = await getGithubUser(accessToken)
   } catch (err) {
     const { refreshToken, refreshTokenExpiresAt } = user
     if (refreshToken && !isExpired(refreshTokenExpiresAt)) {
@@ -197,7 +233,19 @@ module.exports.authorizeUser = async (bearerToken) => {
   })
 }
 
-module.exports.authorizeDeployKey = async (deployKey) => {
-  // create index for deploykey
-  // return user,site,deploykey
+module.exports.authorizeDeployKey = async (authorizationHeader) => {
+  const deployKey = parseDeployKey(authorizationHeader)
+
+  let [site] = await db.query('sites', { deployKey }, { idx: 'idxDeployKey', limit: 1 })
+  if (!site) throw new AuthorizationError('Deploy key invalid')
+
+  site = await db.put('sites', { ...site, deployKeyLastUsedAt: new Date().toISOString() })
+  return site
+}
+
+module.exports.regenerateDeployKey = async (site) => {
+  return await db.put('sites', {
+    ...site,
+    ...generateDeployKey()
+  })
 }

@@ -51,7 +51,6 @@ module.exports.query = async (table, partition, { asc, idx, limit } = {}) => {
   const [partitionKey, partitionValue] = Object.entries(partition)[0]
   const params = {
     TableName: `${tablePrefix}-${table}`,
-    Limit: limit || 100,
     ScanIndexForward: asc || false,
     ExpressionAttributeValues: {
       ':v1': partitionValue
@@ -59,6 +58,7 @@ module.exports.query = async (table, partition, { asc, idx, limit } = {}) => {
     KeyConditionExpression: `${partitionKey} = :v1`
   }
   if (idx) params.IndexName = idx
+  if (limit || limit === 0) params.Limit = limit
   logger.http(`dynamo: query ${table}: ${partitionKey} = ${partitionValue} ${asc ? 'asc' : 'desc'}`)
   const { Items } = await docClient.send(new QueryCommand(params))
   logger.http(`dynamo: query ${table} results: ${(Items || []).length}`)

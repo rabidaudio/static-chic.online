@@ -40,9 +40,9 @@
   },
   "scripts": {
     "serve": "serverless dev",
-    "serve:local": "dotenvx run -- node src/local_server",
+    "serve:local": "node src/local_server.js",
     "lint": "standard --fix",
-    "publish": "serverless deploy",
+    "publish": "dotenvx run -- serverless deploy",
     "admin": "bin/admin",
     "test": "mocha",
     "audit": "npm audit --omit dev"

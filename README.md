@@ -47,17 +47,26 @@ pipx install git-remote-s3
 
 # TODO
 
-- breakup app
 - deploy keys
+  - regenerate deploy key command
+  - show current deployment
+- deploy functions
+  - add optional messages to deployments
+  - use git-short-sha algorithm to show short deployment ids
+- finish CLI
+- cleanup
+  - breakup app
+  - complete integration tests
+  - json vs text outputs from cli
+  - Cloudfront 404 from S3 returns 403 Permission Denied instead
+  - add Tags to everything for cost tracking
 - production deploy
-- deploy CLI
+  - callback url
+  - cli env var configuration: https://github.com/settings/apps/static-chic-online
+- user caps
 - frontend
-- add Tags to everything for cost tracking
-- flag for private-only in sls to disable github logins
-- json vs text outputs from cli
-- complete integration tests
-- Cloudfront 404 from S3 returns 403 Permission Denied instead
 - cli option for using git-remote-s3 directly
-- regenerate deploy key command
-- add optional messages to deployments
-- use git-short-sha algorithm to show short deployment ids
+- Custom deployments
+  - solution for env vars in cli - esbuild
+  - flag for private-only in sls to disable github logins
+  - cleanup admin cli

@@ -42,29 +42,30 @@ module.exports.createTenant = async ({ siteId, baseDomain, customDomain }) => {
     Name: siteId
   }
   logger.http(`cloudfront: create tenant ${siteId}`, params)
-  const { DistributionTenant } = await client.send(new CreateDistributionTenantCommand(params))
-  return DistributionTenant
+  const { DistributionTenant, ETag } = await client.send(new CreateDistributionTenantCommand(params))
+  return { tenant: DistributionTenant, etag: ETag }
 }
 
-module.exports.updateTenant = async ({ tenantId, siteId, baseDomain, customDomain }) => {
+module.exports.updateTenant = async ({ tenantId, siteId, baseDomain, customDomain, etag }) => {
   const params = {
     ...tenantParams({ siteId, baseDomain, customDomain }),
-    Id: tenantId
+    Id: tenantId,
+    IfMatch: etag
   }
   logger.http(`cloudfront: update tenant ${siteId}`, params)
-  const { DistributionTenant } = await client.send(new UpdateDistributionTenantCommand(params))
-  return DistributionTenant
+  const { DistributionTenant, ETag } = await client.send(new UpdateDistributionTenantCommand(params))
+  return { tenant: DistributionTenant, etag: ETag }
 }
 
 module.exports.getTenant = async (tenantId) => {
   logger.http(`cloudfront: get tenant ${tenantId}`)
-  const { DistributionTenant } = await client.send(new GetDistributionTenantCommand({ Identifier: tenantId }))
-  return DistributionTenant
+  const { DistributionTenant, ETag } = await client.send(new GetDistributionTenantCommand({ Identifier: tenantId }))
+  return { tenant: DistributionTenant, etag: ETag }
 }
 
-module.exports.deleteTenant = async (tenantId) => {
+module.exports.deleteTenant = async ({ tenantId, etag }) => {
   logger.http(`cloudfront: delete tenant ${tenantId}`)
-  await client.send(new DeleteDistributionTenantCommand({ Id: tenantId }))
+  await client.send(new DeleteDistributionTenantCommand({ Id: tenantId, IfMatch: etag }))
 }
 
 module.exports.invalidate = async (distributionTenantId) => {

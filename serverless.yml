@@ -9,8 +9,8 @@ stages:
       # Because the same hostedzone is used for all envrionments,
       # it has to be created outside of this CF template and it's
       # ID needs to be put here.
-      hostedZoneId: Z0815807GYU44VR2QYOU
-      baseDomain: static-chic.online
+      hostedZoneId: ${env:HOSTED_ZONE_ID}
+      baseDomain: ${env:BASE_DOMAIN}
       appId: ${self:app}-${sls:stage}
       bucketName: ${param:appId}
       tablePrefix: ${param:appId}
@@ -94,7 +94,7 @@ provider:
 
   environment:
     NODE_ENV: ${sls:stage}
-    HOSTNAME: ${param:apiDomain}
+    HOST: https://${param:apiDomain}
     APP_NAME: ${self:app}
     STAGE: ${sls:stage}
     APP_ID: ${param:appId}
@@ -105,6 +105,8 @@ provider:
     DISTRIBUTION_DOMAIN: !GetAtt CloudfrontDistroDefaultConnectionGroup.RoutingEndpoint
     TABLE_PREFIX: ${param:tablePrefix}
     BUCKET_NAME: ${param:bucketName}
+    GITHUB_CLIENT_ID: ${env:GITHUB_CLIENT_ID}
+    GITHUB_CLIENT_SECRET: ${env:GITHUB_CLIENT_SECRET}
 
 functions:
   api:
@@ -151,6 +153,8 @@ resources:
             AttributeType: S
           - AttributeName: createdAt
             AttributeType: S
+          - AttributeName: deployKey
+            AttributeType: S
         KeySchema:
           - AttributeName: siteId
             KeyType: HASH
@@ -163,6 +167,12 @@ resources:
                 KeyType: HASH
               - AttributeName: createdAt
                 KeyType: RANGE
+            Projection:
+              ProjectionType: ALL
+          - IndexName: idxDeployKey
+            KeySchema:
+              - AttributeName: deployKey
+                KeyType: HASH
             Projection:
               ProjectionType: ALL
     DeploymentsTable:

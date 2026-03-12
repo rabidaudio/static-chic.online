@@ -47,7 +47,8 @@ async function addSite ({ owner, name, wait }) {
 
 async function addCustomDomain ({ site, domain }) {
   try {
-    const updatedSite = await app.setSiteCustomDomain(site, domain)
+    const siteData = await app.getSite(site)
+    const updatedSite = await app.setSiteCustomDomain(siteData, domain)
     console.log(updatedSite)
   } catch (err) {
     if (err instanceof app.DomainValidationFailedError) {
@@ -82,12 +83,14 @@ async function listDeployments ({ site }) {
 async function deploy ({ path, site, exclude, promote, wait }) {
   console.log('zipping and uploading...')
   const contentTarball = await app.createTarball(path, { exclude })
-  const deployment = await app.createDeployment({ siteId: site, contentTarball })
+  const siteData = await app.getSite(site)
+  const deployment = await app.createDeployment({ site: siteData, contentTarball })
   console.log(deployment)
   if (promote) {
     console.log('promoting...')
-    const deployedSite = await app.promoteDeployment(deployment)
-    console.log(deployedSite)
+    let siteData = await app.getSite(site)
+    siteData = await app.promoteDeployment({ siteData, deploymentId: deployment.deploymentId })
+    console.log(siteData)
     if (wait) {
       console.log('waiting for invalidation...')
       const invalidation = await app.awaitInvalidationComplete({ siteId: site, deploymentId: deployment.deploymentId })
@@ -98,7 +101,8 @@ async function deploy ({ path, site, exclude, promote, wait }) {
 
 async function promote ({ siteId, deploymentId, wait }) {
   console.log('promoting...')
-  const site = await app.promoteDeployment({ siteId, deploymentId })
+  let site = await app.getSite(siteId)
+  site = (await app.promoteDeployment({ site, deploymentId })).site
   console.log(site)
   if (wait) {
     console.log('waiting for invalidation...')

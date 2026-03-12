@@ -1,6 +1,6 @@
 const { execSync } = require('node:child_process')
 const { createReadStream } = require('node:fs')
-const { glob, mkdtemp, rm } = require('node:fs/promises')
+const { glob, mkdtemp, rm, writeFile } = require('node:fs/promises')
 const { tmpdir } = require('node:os')
 const path = require('node:path')
 const { pipeline } = require('node:stream/promises')
@@ -59,7 +59,8 @@ module.exports.initializeSite = async ({ siteId, deploymentId, tarball }) => {
   // create an s3 origin, and push the repo
   logger.info(`initializing repository ${siteId}`)
   const cwd = await createTmpDir()
-  const git = simpleGit({ baseDir: cwd })
+  // https://github.com/steveukx/git-js/blob/main/docs/PLUGIN-UNSAFE-ACTIONS.md
+  const git = simpleGit({ baseDir: cwd, unsafe: { allowUnsafePack: true } })
   logger.verbose('git: git init')
   await git.init()
   logger.verbose('git: git-lfs-s3 install')
@@ -67,10 +68,12 @@ module.exports.initializeSite = async ({ siteId, deploymentId, tarball }) => {
 
   logger.info('extracting tarball')
   await extractTarball(tarball, cwd)
+  logger.verbose(`git: echo '${deploymentId}' > .chic-version`)
+  await writeFile(path.join(cwd, '.chic-version'), deploymentId) // ensures commits have something unique
 
   logger.info('committing')
   const ff = await allFilesRelative(cwd, { exclude: ['.git'] })
-  logger.verbose('git: git add -a .')
+  logger.verbose('git: git add -A .')
   await git.add(ff)
   logger.verbose(`git: git commit -m "deployment:${deploymentId}"`)
   const { commit } = await git.commit(`deployment:${deploymentId}`)
@@ -101,22 +104,25 @@ module.exports.addDeployment = async ({ siteId, deploymentId, tarball }) => {
   // commit the results, and push
   logger.info(`initializing repository ${siteId}`)
   const cwd = await createTmpDir()
-  const git = simpleGit({ baseDir: cwd })
+  // https://github.com/steveukx/git-js/blob/main/docs/PLUGIN-UNSAFE-ACTIONS.md
+  const git = simpleGit({ baseDir: cwd, unsafe: { allowUnsafePack: true } })
 
   const origin = getOrigin(siteId)
   logger.info(`cloning repository ${origin}`)
   logger.verbose(`git: git clone ${origin}`)
-  await git.clone(origin, cwd)
+  await git.raw('clone', '-c', 'protocol.s3.allow=always', origin, cwd)
 
   logger.info('extracting tarball')
   const preFiles = await allFilesRelative(cwd, { exclude: ['.git'] })
   logger.verbose('git: git rm -r .')
   await git.rm(preFiles)
   await extractTarball(tarball, cwd)
+  logger.verbose(`git: echo '${deploymentId}' > .chic-version`)
+  await writeFile(path.join(cwd, '.chic-version'), deploymentId) // ensures commits have something unique
 
   logger.info('committing')
   const postFiles = await allFilesRelative(cwd, { exclude: ['.git'] })
-  logger.verbose('git: git add -a .')
+  logger.verbose('git: git add -A .')
   await git.add(postFiles)
   logger.verbose(`git: git commit -m "deployment:${deploymentId}"`)
   const { commit } = await git.commit(`deployment:${deploymentId}`)
@@ -140,12 +146,12 @@ module.exports.promoteDeployment = async (siteId, deploymentId) => {
   // clone, checkout the deployment, copy all files except .git to s3
   logger.info(`initializing repository ${siteId}`)
   const cwd = await createTmpDir()
-  const git = simpleGit({ baseDir: cwd })
+  const git = simpleGit({ baseDir: cwd, unsafe: { allowUnsafePack: true } })
 
   const origin = getOrigin(siteId)
   logger.info(`cloning repository ${origin}`)
   logger.verbose(`git: git clone ${origin}`)
-  await git.clone(origin, cwd)
+  await git.raw('clone', '-c', 'protocol.s3.allow=always', origin, cwd)
 
   logger.info(`checking out deployment ${deploymentId}`)
   logger.verbose(`git: git checkout ${deploymentId}`)

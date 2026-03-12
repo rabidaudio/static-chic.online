@@ -5,6 +5,7 @@ const namor = require('namor')
 
 const logger = require('./logger').getLogger()
 
+const { generateDeployKey } = require('./auth')
 const cfront = require('./cfront')
 const db = require('./db')
 const git = require('./git')
@@ -35,9 +36,6 @@ const generateSiteId = () => {
   return name
 }
 
-// generate a secure random key to grant access to deployments
-const generateDeployKey = () => randomBytes(32).toString('base64')
-
 // generate a unique id per deployment which is sequential in time,
 // i.e. when sorted as strings later deployments are always alphabetically
 // later
@@ -61,8 +59,9 @@ const generateDeployId = () => {
 // }
 
 module.exports.listSitesForUser = async (userId) => {
-  const sites = await db.query('sites', { userId }, { idx: 'idxUserId', asc: false })
-  return sites.map(site => ({ ...site, deployKey: '<obfuscated>' }))
+  // TODO: pagination
+  const sites = await db.query('sites', { userId }, { idx: 'idxUserId', asc: false, limit: 100 })
+  return sites
 }
 
 // create a site. A site has a siteId which is
@@ -78,24 +77,41 @@ module.exports.createSite = async ({ name, userId, customDomain }) => {
   }
 
   await r53.createSubdomain(siteId)
-  return await db.put('sites', {
+  const site = await db.put('sites', {
     siteId,
     userId,
     name,
     customDomain,
-    deployKey: generateDeployKey(),
-    createdAt: new Date().toISOString()
+    gitInitialized: false,
+    createdAt: new Date().toISOString(),
+    ...generateDeployKey()
   })
+  return await getSiteWithStatus(site)
 }
 
-// module.exports.waitForDistribution = async (tenantId) => {
-//   const tenant = await cfront.getTenant(tenantId)
-//   // tenant.Status // TODO: what values??
-// }
+const getSiteWithStatus = async (site) => {
+  const { siteId, currentDeployment, tenantId } = site
+  let status = 'unknown'
+  if (!currentDeployment) {
+    status = 'inactive' // no deployment
+  } else if (!tenantId) {
+    status = 'unknown'
+  } else {
+    const deployment = await db.get('deployments', { siteId, deploymentId: currentDeployment })
+    if (deployment.invalidationId) {
+      const invalidation = await cfront.getInvalidation(tenantId, deployment.invalidationId)
+      status = invalidation.Status.toLowerCase()
+    } else {
+      const distro = await cfront.getTenant(tenantId)
+      status = distro.Status.toLowerCase() // InProgress, Complete, ??
+    }
+  }
+  return { ...site, status }
+}
 
 module.exports.getSite = async (siteId) => {
   const site = await db.get('sites', { siteId })
-  return { ...site, deployKey: '<obfuscated>' }
+  return await getSiteWithStatus(site)
 }
 
 // Check if the customDomain is pointing correctly. Will throw a DomainValidationFailedError
@@ -122,21 +138,21 @@ module.exports.verifyCustomDomain = async (siteId, customDomain) => {
 }
 
 // add/remove custom domain
-module.exports.setSiteCustomDomain = async (siteId, customDomain) => {
+module.exports.setSiteCustomDomain = async (site, customDomain) => {
+  const { siteId, tenantId, etag } = site
   if (customDomain) await this.verifyCustomDomain(siteId, customDomain)
 
-  const site = await db.get('sites', { siteId })
-
   // if distro exists, update it
-  if (site.tenantId) {
+  if (tenantId) {
     logger.info(`updating tenant ${siteId}: domain=${customDomain || 'default'}`)
     const baseDomain = r53.getSiteDomain(siteId)
-    await cfront.updateTenant({ tenantId: site.tenantId, siteId, baseDomain, customDomain })
+    const res = await cfront.updateTenant({ tenantId, siteId, baseDomain, customDomain, etag })
+    site.etag = res.etag
   }
   // otherwise will set on first deploy
 
-  const updatedSite = await db.put('sites', { ...site, customDomain })
-  return { ...updatedSite, deployKey: '<obfuscated>' }
+  site = await db.put('sites', { ...site, customDomain })
+  return await getSiteWithStatus(site)
 }
 
 // create a new deployment for a site.
@@ -145,43 +161,54 @@ module.exports.setSiteCustomDomain = async (siteId, customDomain) => {
 // newer deployments are alphabetically after older ones.
 // NOTE: this does not update the content on the site.
 // For that, call promoteDeployment.
-module.exports.createDeployment = async ({ siteId, contentTarball }) => {
-  const site = await db.get('sites', { siteId })
+module.exports.createDeployment = async ({ site, contentTarball }) => {
+  const { siteId } = site
   const deploymentId = generateDeployId()
 
-  const commitSha = await (site.currentDeployment
+  const commitSha = await (site.gitInitialized
     ? git.addDeployment({ siteId, deploymentId, tarball: contentTarball })
     : git.initializeSite({ siteId, deploymentId, tarball: contentTarball }))
 
+  if (!site.gitInitialized) {
+    await db.put('sites', { ...site, gitInitialized: true })
+  }
+
   logger.info(`create ${siteId}/${deploymentId}`)
-  const deployment = await db.put('deployments', {
+  const createdAt = new Date().toISOString()
+  await db.put('deployments', {
     deploymentId,
     siteId,
     commitSha,
-    createdAt: new Date().toISOString()
+    createdAt
   })
-  return deployment
+  return { deploymentId, siteId, createdAt }
 }
 
 module.exports.listDeployments = async (siteId) => {
-  return await db.query('deployments', { siteId }, { asc: false })
+  // TODO: pagination?
+  return await db.query('deployments', { siteId }, { asc: false, limit: 100 })
 }
 
-module.exports.getDeployment = async ({ siteId, deploymentId }) => {
+module.exports.getDeployment = async ({ site, deploymentId }) => {
+  const { siteId } = site
   return await db.get('deployments', { siteId, deploymentId })
 }
 
 const createDistribution = async ({ siteId, customDomain }) => {
   const baseDomain = r53.getSiteDomain(siteId)
-  const tenant = await cfront.createTenant({ siteId, customDomain, baseDomain })
+  const { tenant, etag } = await cfront.createTenant({ siteId, customDomain, baseDomain })
   logger.verbose('tenant distro created', tenant)
-  return tenant.Id
+  return { tenantId: tenant.Id, status: tenant.Status, etag }
 }
 
 // make the deployment live for the site
-module.exports.promoteDeployment = async ({ siteId, deploymentId }) => {
-  const site = await db.get('sites', { siteId })
-  const deployment = await db.get('deployments', { siteId, deploymentId })
+module.exports.promoteDeployment = async ({ site, deploymentId }) => {
+  const { siteId } = site
+  let deployment = await this.getDeployment({ site, deploymentId })
+  if (site.currentDeployment === deploymentId) {
+    // already deployed, just check the status and return
+    return deployment
+  }
 
   if (!site.tenantId) {
     // logger.warn(
@@ -189,7 +216,9 @@ module.exports.promoteDeployment = async ({ siteId, deploymentId }) => {
     //   'than usual to go live. Future deployments should be much quicker.'
     // ) // TODO: move to cli
     logger.info('creating distro tenant')
-    site.tenantId = await createDistribution(site)
+    const { tenant, etag } = await createDistribution(site)
+    site.tenantId = tenant.tenantId
+    site.etag = etag
     await db.put('sites', site)
   }
 
@@ -198,22 +227,24 @@ module.exports.promoteDeployment = async ({ siteId, deploymentId }) => {
   if (site.currentDeployment) {
     logger.info('invalidating cache')
     const invalidation = await cfront.invalidate(site.tenantId)
-    db.put('deployments', { ...deployment, invalidationId: invalidation.Id })
+    deployment = await db.put('deployments', { ...deployment, invalidationId: invalidation.Id })
   }
 
   logger.info('updating site')
-  return await db.put('sites', {
+  site = await db.put('sites', {
     ...site,
     currentDeployment: deploymentId,
     deployedAt: new Date().toISOString()
   })
+  site = await getSiteWithStatus(site)
+  return { site, deployment }
 }
 
 module.exports.deleteSite = async (siteId) => {
   logger.warn(`deleting site ${siteId}`)
-  const { tenantId } = await db.get('sites', { siteId })
+  const { tenantId, etag } = await db.get('sites', { siteId })
   const deleteDeploymentsForSite = async (siteId) => {
-    for (const { deploymentId } in await db.query('deployments', { siteId })) {
+    for (const { deploymentId } in await db.scan('deployments', { siteId })) {
       logger.info(`deleting ${siteId}/${deploymentId}`)
       await db.delete('deployments', { siteId, deploymentId })
     }
@@ -221,7 +252,7 @@ module.exports.deleteSite = async (siteId) => {
   await Promise.all([
     // delete resources
     (tenantId
-      ? cfront.deleteTenant(tenantId).then(logger.info(`[${siteId}] deleted distribution tenant`))
+      ? cfront.deleteTenant({ tenantId, etag }).then(logger.info(`[${siteId}] deleted distribution tenant`))
       : Promise.resolve()
     ).then(() => r53.deleteSubdomain(siteId))
       .then(logger.info(`[${siteId}] deleted subdomain route`)),
@@ -238,6 +269,8 @@ module.exports.deleteSite = async (siteId) => {
   ])
   logger.info(`site deleted: ${siteId}`)
 }
+
+// TODO: await tenant created
 
 module.exports.awaitInvalidationComplete = async ({ siteId, deploymentId }) => {
   const site = await db.get('sites', { siteId })
