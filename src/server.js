@@ -5,40 +5,21 @@ const { configure: configureLogger, getLogger } = require('./logger')
 configureLogger({ level: 'verbose', pretty: false })
 const logger = getLogger()
 
-const auth = require('./auth')
-const { AuthorizationError } = auth
-const app = require('./app')
-const { DomainValidationFailedError } = app
+const OAuth = require('./auth/oauth')
+const DeployKeys = require('./auth/deploy_keys')
+const Sites = require('./sites')
+const Deployments = require('./deployments')
 
-const server = new Koa()
+const { AuthorizationError } = require('./auth/utils')
+const { DomainValidationFailedError } = Sites
+
+const app = new Koa()
 const router = new Router()
 
-server.use(require('@koa/bodyparser').bodyParser())
-
-// explicitly allow parameters to be returned
-const serializeSite = (site, { showDeployKey } = {}) => {
-  const {
-    siteId, name, customDomain, userId,
-    currentDeployment, deployedAt, createdAt, status,
-    deployKey, deployCreatedAt, deployKeyLastUsedAt
-  } = site
-  return {
-    siteId,
-    name,
-    customDomain,
-    userId,
-    currentDeployment,
-    deployedAt,
-    createdAt,
-    status,
-    deployCreatedAt,
-    deployKeyLastUsedAt,
-    deployKey: (showDeployKey ? deployKey : auth.obfuscateDeployKey(deployKey))
-  }
-}
+app.use(require('@koa/bodyparser').bodyParser())
 
 // log requests
-server.use(async (ctx, next) => {
+app.use(async (ctx, next) => {
   const { method, url } = ctx
   logger.http(`${method} ${url}`)
   const start = Date.now()
@@ -48,7 +29,7 @@ server.use(async (ctx, next) => {
 })
 
 // server errors
-server.use(async (ctx, next) => {
+app.use(async (ctx, next) => {
   try {
     return await next()
   } catch (err) {
@@ -77,20 +58,20 @@ server.use(async (ctx, next) => {
 })
 
 // user auth `Authorization: Basic <base64(userId:accessToken)>`
-server.use(async (ctx, next) => {
+app.use(async (ctx, next) => {
   const authToken = ctx.get('Authorization')
-  if (auth.isBasicToken(authToken)) {
-    ctx.user = await auth.authorizeUser(authToken)
+  if (OAuth.isBasicToken(authToken)) {
+    ctx.user = await OAuth.authorize(authToken)
     // TODO: if refreshToken used, return an updated bearerToken
   }
   return await next()
 })
 
 // deploy key auth `Authorization: Bearer <deployKey>`
-server.use(async (ctx, next) => {
+app.use(async (ctx, next) => {
   const authToken = ctx.get('Authorization')
-  if (auth.isBearerToken(authToken)) {
-    ctx.site = await auth.authorizeDeployKey(authToken)
+  if (DeployKeys.isBearerToken(authToken)) {
+    ctx.site = await DeployKeys.authorizeDeployKey(authToken)
   }
   return await next()
 })
@@ -110,7 +91,7 @@ const findSite = async (ctx, next) => {
 
   const siteId = ctx.params.siteId
   // make sure the user owns the site first
-  const userSites = await app.listSitesForUser(ctx.user.userId)
+  const userSites = await Sites.list(ctx.user.userId)
   const site = userSites.find(s => s.siteId === siteId)
   if (!site || site.userId !== ctx.user.userId) {
     ctx.status = 403
@@ -139,7 +120,8 @@ router.get('/', async (ctx) => {
 })
 
 router.post('/signup', async (ctx) => {
-  const { authReqId, expiresAt, state, authorizationUrl } = await auth.initiateSignup()
+  const provider = ctx.query.provider || 'github'
+  const { authReqId, expiresAt, state, authorizationUrl } = await OAuth.initiateSignup(provider)
   ctx.body = {
     status: 'OK',
     data: { authReqId, expiresAt, state, authorizationUrl }
@@ -147,17 +129,18 @@ router.post('/signup', async (ctx) => {
 })
 
 router.get('/signup/:authReqId', async (ctx) => {
-  const { authReqId, expiresAt, state, userToken, authorizationUrl } = await auth.getSignupState(ctx.params.authReqId)
+  const authReq = await OAuth.getSignupState(ctx.params.authReqId)
+  const { authReqId, expiresAt, state, userToken, authorizationUrl } = authReq
   ctx.body = {
     status: 'OK',
     data: { authReqId, expiresAt, state, userToken, authorizationUrl }
   }
 })
 
-router.get('/oauth/github/callback', async (ctx) => {
+router.get('/oauth/:provider/callback', async (ctx) => {
   ctx.set('Content-Type', 'text/html')
   try {
-    const { userId, username, createdAt } = await auth.handleAuthCallback(ctx.query.code, ctx.query.state)
+    const { userId, username, createdAt } = await OAuth.handleCallback(ctx.params.provider, ctx)
     logger.info('user registered', { userId, username, createdAt })
     ctx.body = `
       <!DOCTYPE html>
@@ -192,25 +175,25 @@ router.get('/oauth/github/callback', async (ctx) => {
 router.post('/sites', requireUserAuth, async (ctx) => {
   const { userId } = ctx.user
   const { name, customDomain } = ctx.request.body
-  const site = await app.createSite({ name, userId, customDomain })
+  const data = await Sites.create({ name, userId, customDomain })
   ctx.status = 201 // created
-  ctx.body = { status: 'OK', data: serializeSite(site, { showDeployKey: true }) }
+  ctx.body = { status: 'OK', data }
 })
 
 router.get('/sites', requireUserAuth, async (ctx) => {
   const { userId } = ctx.user
-  const sites = await app.listSitesForUser(userId)
+  const data = await Sites.list(userId)
   // TODO: pagination
   ctx.body = {
     status: 'OK',
-    data: sites.map(s => serializeSite(s)),
-    pagination: { count: sites.length }
+    data,
+    pagination: { count: data.length }
   }
 })
 
 router.get('/sites/:siteId', requireUserAuthOrDeployKey, findSite, async (ctx) => {
-  const site = await app.getSite(ctx.params.siteId)
-  ctx.body = { status: 'OK', data: serializeSite(site) }
+  const data = await Sites.get(ctx.params.siteId)
+  ctx.body = { status: 'OK', data }
 })
 
 const handleDomainValidationError = async (ctx, next) => {
@@ -240,29 +223,29 @@ const handleDomainValidationError = async (ctx, next) => {
 
 router.put('/sites/:siteId', requireUserAuth, findSite, handleDomainValidationError, async (ctx) => {
   const { customDomain } = ctx.request.body
-  let site = ctx.site
-  if (customDomain === undefined || (!customDomain && !site.customDomain) || customDomain === ctx.site.customDomain) {
+  let data = ctx.site
+  if (customDomain === undefined || (!customDomain && !ctx.site.customDomain) || customDomain === ctx.site.customDomain) {
     ctx.status = 202 // indicate that the custom domain didn't change so nothing happened
   } else {
-    site = await app.setSiteCustomDomain(site, customDomain)
+    data = await Sites.setCustomDomain(ctx.site, customDomain)
   }
-  ctx.body = { status: 'OK', data: serializeSite(site) }
+  ctx.body = { status: 'OK', data }
 })
 
 // To invalidate a deploy key, simply regenerate and forget it
 router.post('/sites/:siteId/deployKey/regenerate', requireUserAuth, findSite, async (ctx) => {
-  const site = await auth.regenerateDeployKey(ctx.site)
-  ctx.body = { status: 'OK', data: serializeSite(site, { showDeployKey: true }) }
+  const data = await Sites.regenerateDeployKey(ctx.site)
+  ctx.body = { status: 'OK', data }
 })
 
 router.delete('/sites/:siteId', requireUserAuth, findSite, async (ctx) => {
   const { siteId } = ctx.site
-  await app.deleteSite(siteId)
+  await Sites.delete(siteId)
   ctx.body = { status: 'OK', data: { siteId } }
 })
 
 router.get('/sites/:siteId/deployments', requireUserAuthOrDeployKey, findSite, async (ctx) => {
-  const deployments = await app.listDeployments(ctx.params.siteId)
+  const deployments = await Deployments.list(ctx.params.siteId)
   // TODO: pagination
   ctx.body = {
     status: 'OK',
@@ -274,7 +257,7 @@ router.get('/sites/:siteId/deployments', requireUserAuthOrDeployKey, findSite, a
 router.post('/sites/:siteId/deployments', requireUserAuthOrDeployKey, findSite, async (ctx) => {
   const site = ctx.site
   const contentTarball = ReadableStream.from(ctx.req)
-  const deployment = await app.createDeployment({ site, contentTarball })
+  const deployment = await Deployments.create({ site, contentTarball })
   ctx.status = 201 // created
   ctx.body = { status: 'OK', data: deployment }
 })
@@ -282,7 +265,7 @@ router.post('/sites/:siteId/deployments', requireUserAuthOrDeployKey, findSite, 
 router.get('/sites/:siteId/deployments/:deploymentId', requireUserAuthOrDeployKey, findSite, async (ctx) => {
   const site = ctx.site
   const deploymentId = ctx.params.deploymentId
-  const deployment = await app.getDeployment({ site, deploymentId })
+  const deployment = await Deployments.get({ site, deploymentId })
   ctx.body = { status: 'OK', data: deployment }
 })
 
@@ -292,7 +275,7 @@ router.post('/sites/:siteId/deployments/:deploymentId/promote', requireUserAuthO
   if (site.currentDeployment === deploymentId) {
     ctx.status = 202 // indicate that site is already live, nothing will happen
   }
-  const promotion = await app.promoteDeployment({ site, deploymentId })
+  const promotion = await Deployments.promote({ site, deploymentId })
   site = promotion.site
   const { siteId, deployedAt, status, deployment } = site
   ctx.body = {
@@ -303,10 +286,10 @@ router.post('/sites/:siteId/deployments/:deploymentId/promote', requireUserAuthO
   }
 })
 
-server.use(router.routes()).use(router.allowedMethods())
+app.use(router.routes()).use(router.allowedMethods())
 
 // fallthrough
-server.use((ctx) => {
+app.use((ctx) => {
   ctx.status = 404
   ctx.body = {
     status: 'ERROR',
@@ -314,4 +297,4 @@ server.use((ctx) => {
   }
 })
 
-module.exports = { server }
+module.exports = { app }

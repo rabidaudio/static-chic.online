@@ -111,6 +111,20 @@ async function promote ({ siteId, deploymentId, wait }) {
   }
 }
 
+async function wipeEverything () {
+  if (process.env.NODE_ENV !== 'dev') throw new Error('Can only destroy dev environments')
+
+  logger.warn('deleting everything!')
+  await s3.deleteRecursive('')
+  for await (const { siteId } of db.scan('sites')) {
+    await this.deleteSite(siteId)
+  }
+  for await (const { userId } of db.scan('users')) {
+    await db.delete('users', { userId })
+    logger.info(`deleted user ${userId}`)
+  }
+}
+
 module.exports = function main () {
   let cli = yargs(hideBin(process.argv))
     .scriptName('admin')
@@ -182,7 +196,7 @@ module.exports = function main () {
 
   if (process.env.NODE_ENV === 'dev') {
     cli = cli.command('wipe_everything', 'delete all sites, deployments, and users',
-      (yargs) => yargs, wrap(async () => await app.wipeEverything()))
+      (yargs) => yargs, wrap(async () => await wipeEverything()))
   }
 
   cli.help('h')
@@ -191,3 +205,22 @@ module.exports = function main () {
     .demandCommand(1, 1, 'command required')
     .parse()
 }
+
+// TODO: await tenant created
+
+// module.exports.awaitInvalidationComplete = async ({ siteId, deploymentId }) => {
+//   const site = await db.get('sites', { siteId })
+//   const deployment = await db.get('deployments', { siteId, deploymentId })
+//   if (!deployment.invalidationId) {
+//     logger.info(`no invalidations for ${siteId}/${deploymentId}`)
+//     return
+//   }
+
+//   logger.info(`waiting for invalidation ${siteId}/${deploymentId}`)
+//   while (true) {
+//     const invalidation = await cfront.getInvalidation(site.tenantId, deployment.invalidationId)
+//     logger.info(`invalidation status: ${invalidation.Status}`)
+//     if (invalidation.Status === 'Completed') return invalidation
+//     await delay(5000)
+//   }
+// }

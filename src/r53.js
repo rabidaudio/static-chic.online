@@ -7,10 +7,8 @@ const logger = require('./logger').getLogger()
 
 const client = new Route53Client()
 
-module.exports.getSiteDomain = (siteId) => `${siteId}.${process.env.SITES_DOMAIN}`
-
-const getSiteRecordSet = (siteId) => ({
-  Name: this.getSiteDomain(siteId),
+const getRecordSet = (domain) => ({
+  Name: domain,
   Type: 'CNAME',
   TTL: 300,
   ResourceRecords: [
@@ -18,24 +16,25 @@ const getSiteRecordSet = (siteId) => ({
   ]
 })
 
-const changeResource = async (operation, siteId) => {
+const changeResource = async (operation, domain) => {
   const params = {
     HostedZoneId: process.env.HOSTED_ZONE_ID,
     ChangeBatch: {
-      Comment: `${operation} ${siteId}`,
+      Comment: `${operation} ${domain}`,
       Changes: [
         {
           Action: operation,
-          ResourceRecordSet: getSiteRecordSet(siteId)
+          ResourceRecordSet: getRecordSet(domain)
         }
       ]
     }
   }
-  logger.http(`route53: ${operation} ${siteId}`)
+  logger.http(`route53: ${operation} ${domain}`)
   const { Id, Status } = await client.send(new ChangeResourceRecordSetsCommand(params))
-  return { Id, Status }
+  return { id: Id, status: Status }
 }
 
-module.exports.createSubdomain = async (siteId) => changeResource('UPSERT', siteId)
-
-module.exports.deleteSubdomain = async (siteId) => changeResource('DELETE', siteId)
+module.exports = {
+  createSubdomain: async (domain) => changeResource('UPSERT', domain),
+  deleteSubdomain: async (domain) => changeResource('DELETE', domain)
+}
